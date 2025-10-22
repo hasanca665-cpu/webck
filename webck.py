@@ -183,8 +183,15 @@ def load_users():
             try:
                 if os.path.exists(file_path):
                     with open(file_path, 'r', encoding='utf-8') as f:
-                        return json.load(f)
-            except:
+                        data = json.load(f)
+                        # Ensure we return a dictionary, not a list
+                        if isinstance(data, dict):
+                            return data
+                        else:
+                            print(f"⚠️ Users file contains {type(data)}, converting to dict")
+                            return {}
+            except Exception as e:
+                print(f"❌ Error loading from {file_path}: {e}")
                 continue
         return {}
     except Exception as e:
@@ -211,7 +218,19 @@ def load_stats():
             try:
                 if os.path.exists(file_path):
                     with open(file_path, 'r', encoding='utf-8') as f:
-                        return json.load(f)
+                        data = json.load(f)
+                        # Ensure we return a dictionary
+                        if isinstance(data, dict):
+                            return data
+                        else:
+                            print(f"⚠️ Stats file contains {type(data)}, returning default")
+                            return {
+                                "total_checked": 0, 
+                                "total_deleted": 0, 
+                                "today_checked": 0, 
+                                "today_deleted": 0,
+                                "last_reset": datetime.now().isoformat()
+                            }
             except:
                 continue
         return {
@@ -498,7 +517,10 @@ def is_user_approved(user_id):
     if user_id == ADMIN_ID:
         return True
     users = load_users()
-    return users.get(str(user_id), {}).get("approved", False)
+    # Ensure users is a dictionary before accessing it
+    if isinstance(users, dict):
+        return users.get(str(user_id), {}).get("approved", False)
+    return False
 
 # Track status
 async def track_status_optimized(context: CallbackContext):
@@ -561,7 +583,7 @@ async def track_status_optimized(context: CallbackContext):
         if checks >= 6:
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            timeout_text = f"`{phone}` ⏰ Try leter"
+            timeout_text = f"`{phone}` ⏰ Timeout (Last: {status_name})"
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -635,6 +657,11 @@ async def start(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
     users = load_users()
     
+    # Ensure users is a dictionary
+    if not isinstance(users, dict):
+        print("⚠️ Users data is not a dictionary, initializing empty dict")
+        users = {}
+    
     if user_id == ADMIN_ID:
         keyboard = [
             [KeyboardButton("➕ অ্যাকাউন্ট যোগ"), KeyboardButton("📋 অ্যাকাউন্ট লিস্ট")],
@@ -696,7 +723,7 @@ async def start(update: Update, context: CallbackContext) -> None:
     remaining = account_manager.get_remaining_checks()
     await update.message.reply_text(
         f"🔥 **নম্বর চেকার বট**\n\n"
-        f"📱 **Active Server:** {active}\n"
+        f"📱 **Active accounts:** {active}\n"
         f"✅ **Remaining checks:** {remaining}\n\n"
         f"📱 **নম্বর পাঠান** যেকোনো format এ",
         parse_mode='Markdown'
@@ -731,6 +758,11 @@ async def handle_approval(update: Update, context: CallbackContext) -> None:
     data = query.data
     user_id = int(data.split('_')[1])
     users = load_users()
+    
+    # Ensure users is a dictionary
+    if not isinstance(users, dict):
+        users = {}
+        
     if data.startswith('allow_'):
         users[str(user_id)]["approved"] = True
         users[str(user_id)]["pending"] = False
@@ -759,6 +791,11 @@ async def admin_users(update: Update, context: CallbackContext) -> None:
         await update.message.reply_text("❌ Admin only command!")
         return
     users = load_users()
+    
+    # Ensure users is a dictionary
+    if not isinstance(users, dict):
+        users = {}
+        
     if not users:
         await update.message.reply_text("❌ No users in database!")
         return
@@ -795,6 +832,11 @@ async def handle_user_management(update: Update, context: CallbackContext) -> No
     if data.startswith('user_'):
         user_id = data.split('_')[1]
         users = load_users()
+        
+        # Ensure users is a dictionary
+        if not isinstance(users, dict):
+            users = {}
+            
         user_data = users.get(user_id, {})
         status = "✅ Approved" if user_data.get("approved") else "⏳ Pending" if user_data.get("pending") else "❌ Denied"
         await query.edit_message_text(
@@ -807,6 +849,11 @@ async def handle_user_management(update: Update, context: CallbackContext) -> No
     elif data.startswith('toggle_'):
         user_id = data.split('_')[1]
         users = load_users()
+        
+        # Ensure users is a dictionary
+        if not isinstance(users, dict):
+            users = {}
+            
         if user_id in users:
             users[user_id]["approved"] = not users[user_id]["approved"]
             users[user_id]["pending"] = False
