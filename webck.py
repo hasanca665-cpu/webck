@@ -9,18 +9,14 @@ import logging
 import aiohttp
 from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext, CallbackQueryHandler
 from datetime import datetime, timedelta
 from telegram.error import BadRequest
 
-# Configure logging to focus on errors only
+# Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
-    level=logging.ERROR,
-    handlers=[
-        logging.FileHandler("bot_debug.log", encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    level=logging.ERROR
 )
 logger = logging.getLogger(__name__)
 
@@ -33,7 +29,7 @@ def home():
 
 def run_flask():
     port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN', "6224828344:AAF8T-lhNZDl3E8dBRzK7p6NJtIr6Dzj0b8")
 BASE_URL = "http://8.222.182.223:8081"
@@ -357,92 +353,91 @@ def is_user_approved(user_id):
     return users.get(str(user_id), {}).get("approved", False)
 
 # Track status
-async def track_status_optimized(context: CallbackContext):
-    data = context.job.data
+def track_status_optimized(bot, data):
     phone = data['phone']
     token = data['token']
     username = data['username']
     checks = data['checks']
     last_status = data.get('last_status', '🔵 Processing...')
     
-    try:
-        async with aiohttp.ClientSession() as session:
-            status_code, status_name, record_id = await get_status_async(session, token, phone)
-        
-        if status_code == -1:
-            account_manager.release_token(username)
-            error_text = f"`{phone}` ❌ Token Error (Auto-Retry)"
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=data['chat_id'], 
-                    message_id=data['message_id'],
-                    text=error_text,
-                    parse_mode='Markdown'
-                )
-            except BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    logger.error(f"❌ Message update failed for {phone}: {e}")
-            return
-        
-        if status_name != last_status:
-            new_text = f"`{phone}` {status_name}"
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=data['chat_id'], 
-                    message_id=data['message_id'],
-                    text=new_text,
-                    parse_mode='Markdown'
-                )
-            except BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    logger.error(f"❌ Message update failed for {phone}: {e}")
-        
-        final_states = [0, 1, 4, 7, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-        if status_code in final_states:
-            account_manager.release_token(username)
-            deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            final_text = f"`{phone}` {status_name}"
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=data['chat_id'], 
-                    message_id=data['message_id'],
-                    text=final_text,
-                    parse_mode='Markdown'
-                )
-            except BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    logger.error(f"❌ Final message update failed for {phone}: {e}")
-            return
-        
-        if checks >= 6:
-            account_manager.release_token(username)
-            deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            timeout_text = f"`{phone}` ⏰ Timeout (Last: {status_name})"
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=data['chat_id'], 
-                    message_id=data['message_id'],
-                    text=timeout_text,
-                    parse_mode='Markdown'
-                )
-            except BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    logger.error(f"❌ Timeout message update failed for {phone}: {e}")
-            return
-        
-        next_check = 1
-        context.job_queue.run_once(
-            track_status_optimized, 
-            next_check,
-            data={
+    async def track():
+        try:
+            async with aiohttp.ClientSession() as session:
+                status_code, status_name, record_id = await get_status_async(session, token, phone)
+            
+            if status_code == -1:
+                account_manager.release_token(username)
+                error_text = f"`{phone}` ❌ Token Error (Auto-Retry)"
+                try:
+                    bot.edit_message_text(
+                        chat_id=data['chat_id'], 
+                        message_id=data['message_id'],
+                        text=error_text,
+                        parse_mode='Markdown'
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"❌ Message update failed for {phone}: {e}")
+                return
+            
+            if status_name != last_status:
+                new_text = f"`{phone}` {status_name}"
+                try:
+                    bot.edit_message_text(
+                        chat_id=data['chat_id'], 
+                        message_id=data['message_id'],
+                        text=new_text,
+                        parse_mode='Markdown'
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"❌ Message update failed for {phone}: {e}")
+            
+            final_states = [0, 1, 4, 7, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+            if status_code in final_states:
+                account_manager.release_token(username)
+                deleted_count = await delete_number_from_all_accounts_optimized(phone)
+                final_text = f"`{phone}` {status_name}"
+                try:
+                    bot.edit_message_text(
+                        chat_id=data['chat_id'], 
+                        message_id=data['message_id'],
+                        text=final_text,
+                        parse_mode='Markdown'
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"❌ Final message update failed for {phone}: {e}")
+                return
+            
+            if checks >= 6:
+                account_manager.release_token(username)
+                deleted_count = await delete_number_from_all_accounts_optimized(phone)
+                timeout_text = f"`{phone}` ⏰ Timeout (Last: {status_name})"
+                try:
+                    bot.edit_message_text(
+                        chat_id=data['chat_id'], 
+                        message_id=data['message_id'],
+                        text=timeout_text,
+                        parse_mode='Markdown'
+                    )
+                except BadRequest as e:
+                    if "Message is not modified" not in str(e):
+                        logger.error(f"❌ Timeout message update failed for {phone}: {e}")
+                return
+            
+            next_check = 1
+            time.sleep(next_check)
+            track_status_optimized(bot, {
                 **data, 
                 'checks': checks + 1, 
                 'last_status': status_name
-            }
-        )
-    except Exception as e:
-        logger.error(f"❌ Tracking error for {phone}: {e}")
-        account_manager.release_token(username)
+            })
+        except Exception as e:
+            logger.error(f"❌ Tracking error for {phone}: {e}")
+            account_manager.release_token(username)
+    
+    asyncio.run(track())
 
 # Bulk delete
 async def delete_number_from_all_accounts_optimized(phone):
@@ -475,7 +470,7 @@ async def delete_if_exists(session, token, phone, username):
         return False
 
 # Daily stats reset
-async def reset_daily_stats(context: CallbackContext):
+def reset_daily_stats(context):
     stats = load_stats()
     stats["today_checked"] = 0
     stats["today_deleted"] = 0
@@ -483,7 +478,7 @@ async def reset_daily_stats(context: CallbackContext):
     save_stats(stats)
 
 # Bot command handlers
-async def start(update: Update, context: CallbackContext) -> None:
+def start(update, context):
     user_id = update.effective_user.id
     if user_id == ADMIN_ID:
         keyboard = [
@@ -496,7 +491,7 @@ async def start(update: Update, context: CallbackContext) -> None:
         accounts_status = account_manager.get_accounts_status()
         active = accounts_status["active"]
         remaining = account_manager.get_remaining_checks()
-        await update.message.reply_text(
+        update.message.reply_text(
             f"🔥 **নম্বর চেকার বট** 👑\n\n"
             f"📱 **Total Accounts:** {accounts_status['total']}\n"
             f"✅ **Active Accounts:** {active}\n"
@@ -525,7 +520,7 @@ async def start(update: Update, context: CallbackContext) -> None:
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(
+        context.bot.send_message(
             ADMIN_ID,
             f"🆕 New user wants to use the bot:\n"
             f"👤 User: {update.effective_user.first_name}\n"
@@ -533,12 +528,12 @@ async def start(update: Update, context: CallbackContext) -> None:
             f"🆔 ID: {user_id}",
             reply_markup=reply_markup
         )
-        await update.message.reply_text(
+        update.message.reply_text(
             "⏳ Your access request has been sent to admin. Please wait for approval."
         )
         return
     if not users[str(user_id)]["approved"]:
-        await update.message.reply_text(
+        update.message.reply_text(
             "⏳ Your access is still pending approval. Please wait for admin to approve."
         )
         return
@@ -549,7 +544,7 @@ async def start(update: Update, context: CallbackContext) -> None:
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     active = account_manager.get_active_count()
     remaining = account_manager.get_remaining_checks()
-    await update.message.reply_text(
+    update.message.reply_text(
         f"🔥 **নম্বর চেকার বট**\n\n"
         f"📱 **Active accounts:** {active}\n"
         f"✅ **Remaining checks:** {remaining}\n\n"
@@ -562,13 +557,13 @@ async def start(update: Update, context: CallbackContext) -> None:
         parse_mode='Markdown'
     )
 
-async def show_stats(update: Update, context: CallbackContext) -> None:
+def show_stats(update, context):
     if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+        update.message.reply_text("❌ You are not approved to use this bot!")
         return
     stats = load_stats()
     accounts_status = account_manager.get_accounts_status()
-    await update.message.reply_text(
+    update.message.reply_text(
         f"📊 **Statistics Dashboard**\n\n"
         f"🔢 **Total Checked:** {stats['total_checked']}\n"
         f"🗑️ **Total Deleted:** {stats['total_deleted']}\n"
@@ -582,11 +577,11 @@ async def show_stats(update: Update, context: CallbackContext) -> None:
         parse_mode='Markdown'
     )
 
-async def handle_approval(update: Update, context: CallbackContext) -> None:
+def handle_approval(update, context):
     query = update.callback_query
-    await query.answer()
+    query.answer()
     if query.from_user.id != ADMIN_ID:
-        await query.message.reply_text("❌ Only admin can use these buttons!")
+        query.message.reply_text("❌ Only admin can use these buttons!")
         return
     data = query.data
     user_id = int(data.split('_')[1])
@@ -595,10 +590,10 @@ async def handle_approval(update: Update, context: CallbackContext) -> None:
         users[str(user_id)]["approved"] = True
         users[str(user_id)]["pending"] = False
         save_users(users)
-        await query.edit_message_text(
+        query.edit_message_text(
             f"✅ User {users[str(user_id)]['username']} has been approved!"
         )
-        await context.bot.send_message(
+        context.bot.send_message(
             user_id,
             "✅ Your access has been approved by admin! Use /start to begin."
         )
@@ -606,21 +601,21 @@ async def handle_approval(update: Update, context: CallbackContext) -> None:
         users[str(user_id)]["approved"] = False
         users[str(user_id)]["pending"] = False
         save_users(users)
-        await query.edit_message_text(
+        query.edit_message_text(
             f"❌ User {users[str(user_id)]['username']} has been denied!"
         )
-        await context.bot.send_message(
+        context.bot.send_message(
             user_id,
             "❌ Your access request has been denied by admin."
         )
 
-async def admin_users(update: Update, context: CallbackContext) -> None:
+def admin_users(update, context):
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Admin only command!")
+        update.message.reply_text("❌ Admin only command!")
         return
     users = load_users()
     if not users:
-        await update.message.reply_text("❌ No users in database!")
+        update.message.reply_text("❌ No users in database!")
         return
     keyboard = []
     for user_id, user_data in users.items():
@@ -643,13 +638,13 @@ async def admin_users(update: Update, context: CallbackContext) -> None:
     msg = "👥 **User Management**\n\n"
     msg += "✅ - Approved\n⏳ - Pending\n❌ - Denied\n\n"
     msg += "Click buttons to manage users:"
-    await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
+    update.message.reply_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
 
-async def handle_user_management(update: Update, context: CallbackContext) -> None:
+def handle_user_management(update, context):
     query = update.callback_query
-    await query.answer()
+    query.answer()
     if query.from_user.id != ADMIN_ID:
-        await query.message.reply_text("❌ Only admin can use these buttons!")
+        query.message.reply_text("❌ Only admin can use these buttons!")
         return
     data = query.data
     if data.startswith('user_'):
@@ -657,7 +652,7 @@ async def handle_user_management(update: Update, context: CallbackContext) -> No
         users = load_users()
         user_data = users.get(user_id, {})
         status = "✅ Approved" if user_data.get("approved") else "⏳ Pending" if user_data.get("pending") else "❌ Denied"
-        await query.edit_message_text(
+        query.edit_message_text(
             f"👤 **User Details**\n\n"
             f"🆔 ID: `{user_id}`\n"
             f"📛 Name: {user_data.get('username', 'N/A')}\n"
@@ -672,23 +667,23 @@ async def handle_user_management(update: Update, context: CallbackContext) -> No
             users[user_id]["pending"] = False
             save_users(users)
             status = "✅ Approved" if users[user_id]["approved"] else "❌ Denied"
-            await query.edit_message_text(
+            query.edit_message_text(
                 f"🔄 User {users[user_id]['username']} status changed to: {status}"
             )
 
-async def add_account(update: Update, context: CallbackContext) -> None:
+def add_account(update, context):
     if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+        update.message.reply_text("❌ You are not approved to use this bot!")
         return
-    await update.message.reply_text("👤 `username:password` পাঠান\nযেমন: `HasanCA:HasanCA`", parse_mode='Markdown')
+    update.message.reply_text("👤 `username:password` পাঠান\nযেমন: `HasanCA:HasanCA`", parse_mode='Markdown')
 
-async def list_accounts(update: Update, context: CallbackContext) -> None:
+def list_accounts(update, context):
     if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+        update.message.reply_text("❌ You are not approved to use this bot!")
         return
     accounts = load_accounts()
     if not accounts:
-        await update.message.reply_text("❌ কোনো অ্যাকাউন্ট নেই!")
+        update.message.reply_text("❌ কোনো অ্যাকাউন্ট নেই!")
         return
     accounts_status = account_manager.get_accounts_status()
     msg = "📋 **অ্যাকাউন্ট লিস্ট:**\n\n"
@@ -700,56 +695,68 @@ async def list_accounts(update: Update, context: CallbackContext) -> None:
     msg += f"• মোট অ্যাকাউন্ট: {accounts_status['total']}\n"
     msg += f"• এক্টিভ: {accounts_status['active']}\n"
     msg += f"• ইনএক্টিভ: {accounts_status['inactive']}"
-    await update.message.reply_text(msg, parse_mode='Markdown')
+    update.message.reply_text(msg, parse_mode='Markdown')
 
-async def one_click_login(update: Update, context: CallbackContext) -> None:
+def one_click_login(update, context):
     if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+        update.message.reply_text("❌ You are not approved to use this bot!")
         return
-    processing_msg = await update.message.reply_text("🔄 সব অ্যাকাউন্ট লগইন করা হচ্ছে...")
-    successful_logins = await account_manager.login_all_accounts()
-    accounts_status = account_manager.get_accounts_status()
-    await processing_msg.edit_text(
-        f"✅ **ওয়ান-ক্লিক লগইন সম্পূর্ণ!**\n\n"
-        f"📊 **রেজাল্ট:**\n"
-        f"• সফল লগইন: {successful_logins}\n"
-        f"• ব্যর্থ: {len(account_manager.accounts) - successful_logins}\n"
-        f"• মোট এক্টিভ: {accounts_status['active']}\n\n"
-        f"⚡ **Available Checks:** {account_manager.get_remaining_checks()}"
-    )
+    processing_msg = update.message.reply_text("🔄 সব অ্যাকাউন্ট লগইন করা হচ্ছে...")
+    
+    async def login_async():
+        successful_logins = await account_manager.login_all_accounts()
+        accounts_status = account_manager.get_accounts_status()
+        processing_msg.edit_text(
+            f"✅ **ওয়ান-ক্লিক লগইন সম্পূর্ণ!**\n\n"
+            f"📊 **রেজাল্ট:**\n"
+            f"• সফল লগইন: {successful_logins}\n"
+            f"• ব্যর্থ: {len(account_manager.accounts) - successful_logins}\n"
+            f"• মোট এক্টিভ: {accounts_status['active']}\n\n"
+            f"⚡ **Available Checks:** {account_manager.get_remaining_checks()}"
+        )
+    
+    asyncio.run(login_async())
 
-async def one_click_logout(update: Update, context: CallbackContext) -> None:
+def one_click_logout(update, context):
     if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+        update.message.reply_text("❌ You are not approved to use this bot!")
         return
-    processing_msg = await update.message.reply_text("🔄 সব অ্যাকাউন্ট লগআউট করা হচ্ছে...")
-    await account_manager.logout_all_accounts()
-    await processing_msg.edit_text(
-        "✅ **সব অ্যাকাউন্ট সফলভাবে লগআউট করা হয়েছে!**\n\n"
-        "আপনি আবার লগইন করতে চাইলে \"🚀 ওয়ান-ক্লিক লগইন\" বাটন ব্যবহার করুন।"
-    )
+    processing_msg = update.message.reply_text("🔄 সব অ্যাকাউন্ট লগআউট করা হচ্ছে...")
+    
+    async def logout_async():
+        await account_manager.logout_all_accounts()
+        processing_msg.edit_text(
+            "✅ **সব অ্যাকাউন্ট সফলভাবে লগআউট করা হয়েছে!**\n\n"
+            "আপনি আবার লগইন করতে চাইলে \"🚀 ওয়ান-ক্লিক লগইন\" বাটন ব্যবহার করুন।"
+        )
+    
+    asyncio.run(logout_async())
 
-async def restart_bot(update: Update, context: CallbackContext) -> None:
+def restart_bot(update, context):
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Admin only command!")
+        update.message.reply_text("❌ Admin only command!")
         return
-    await update.message.reply_text("🔄 বট রিস্টার্ট করা হচ্ছে...")
-    await account_manager.initialize()
-    accounts_status = account_manager.get_accounts_status()
-    await update.message.reply_text(
-        f"✅ **বট সফলভাবে রিস্টার্ট হয়েছে!**\n\n"
-        f"📊 **কারেন্ট স্ট্যাটাস:**\n"
-        f"• এক্টিভ অ্যাকাউন্ট: {accounts_status['active']}\n"
-        f"• Available Checks: {account_manager.get_remaining_checks()}\n"
-        f"• মোট অ্যাকাউন্ট: {accounts_status['total']}"
-    )
+    update.message.reply_text("🔄 বট রিস্টার্ট করা হচ্ছে...")
+    
+    async def restart_async():
+        await account_manager.initialize()
+        accounts_status = account_manager.get_accounts_status()
+        update.message.reply_text(
+            f"✅ **বট সফলভাবে রিস্টার্ট হয়েছে!**\n\n"
+            f"📊 **কারেন্ট স্ট্যাটাস:**\n"
+            f"• এক্টিভ অ্যাকাউন্ট: {accounts_status['active']}\n"
+            f"• Available Checks: {account_manager.get_remaining_checks()}\n"
+            f"• মোট অ্যাকাউন্ট: {accounts_status['total']}"
+        )
+    
+    asyncio.run(restart_async())
 
-async def logout_account(update: Update, context: CallbackContext) -> None:
+def logout_account(update, context):
     if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+        update.message.reply_text("❌ You are not approved to use this bot!")
         return
     if not context.args:
-        await update.message.reply_text("🚪 `/logout username`")
+        update.message.reply_text("🚪 `/logout username`")
         return
     username = context.args[0]
     accounts = load_accounts()
@@ -761,15 +768,15 @@ async def logout_account(update: Update, context: CallbackContext) -> None:
             if username in account_manager.token_usage:
                 del account_manager.token_usage[username]
             save_accounts(accounts)
-            await update.message.reply_text(f"✅ `{username}` লগআউট!")
+            update.message.reply_text(f"✅ `{username}` লগআউট!")
             return
-    await update.message.reply_text("❌ অ্যাকাউন্ট পাওয়া যায়নি!")
+    update.message.reply_text("❌ অ্যাকাউন্ট পাওয়া যায়নি!")
 
-async def help_command(update: Update, context: CallbackContext) -> None:
+def help_command(update, context):
     if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+        update.message.reply_text("❌ You are not approved to use this bot!")
         return
-    await update.message.reply_text(
+    update.message.reply_text(
         "❓ **সাহায্য:**\n\n"
         "📱 **নম্বর চেক:** সরাসরি নম্বর পাঠান\n"
         "➕ **অ্যাকাউন্ট যোগ:** `username:password`\n"
@@ -792,120 +799,103 @@ async def async_add_number_optimized(token, phone, msg, username):
         async with aiohttp.ClientSession() as session:
             added = await add_number_async(session, token, 11, phone)
             if added:
-                await msg.edit_text(f"`{phone}` 🔵 In Progress", parse_mode='Markdown')
+                msg.edit_text(f"`{phone}` 🔵 In Progress", parse_mode='Markdown')
             else:
                 status_code, status_name, record_id = await get_status_async(session, token, phone)
                 if status_code == 16:
-                    await msg.edit_text(f"`{phone}` 🚫 Already Exists", parse_mode='Markdown')
+                    msg.edit_text(f"`{phone}` 🚫 Already Exists", parse_mode='Markdown')
                     account_manager.release_token(username)
                     return
-                await msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
+                msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
                 account_manager.release_token(username)
     except Exception as e:
         logger.error(f"❌ Add error for {phone}: {e}")
-        await msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
+        msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
         account_manager.release_token(username)
 
 # Main message handler
-async def handle_message_optimized(update: Update, context: CallbackContext) -> None:
+def handle_message_optimized(update, context):
     if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+        update.message.reply_text("❌ You are not approved to use this bot!")
         return
     text = update.message.text.strip()
     if text == "📊 Statistics":
-        await show_stats(update, context)
+        show_stats(update, context)
         return
     if text == "👥 User Management" and update.effective_user.id == ADMIN_ID:
-        await admin_users(update, context)
+        admin_users(update, context)
         return
     if text == "🚀 ওয়ান-ক্লিক লগইন":
-        await one_click_login(update, context)
+        one_click_login(update, context)
         return
     if text == "🚪 ওয়ান-ক্লিক লগআউট":
-        await one_click_logout(update, context)
+        one_click_logout(update, context)
         return
     if text == "🔄 রিস্টার্ট বট":
-        await restart_bot(update, context)
+        restart_bot(update, context)
         return
     if ':' in text and len(text.split(':')) == 2:
         username, password = text.split(':')
-        token = await login_api_async(username, password)
-        if token:
-            accounts = load_accounts()
-            account_exists = False
-            for acc in accounts:
-                if acc["username"] == username:
-                    acc["password"] = password
-                    acc["token"] = token
-                    account_exists = True
-                    break
-            if not account_exists:
-                accounts.append({"username": username, "password": password, "token": token})
-            save_accounts(accounts)
-            await account_manager.initialize()
-            await update.message.reply_text(f"✅ `{username}` যোগ! Total: {len(accounts)}")
-        else:
-            await update.message.reply_text("❌ লগইন ফেইল! ইউজারনেম/পাসওয়ার্ড চেক করুন।")
+        
+        async def add_account_async():
+            token = await login_api_async(username, password)
+            if token:
+                accounts = load_accounts()
+                account_exists = False
+                for acc in accounts:
+                    if acc["username"] == username:
+                        acc["password"] = password
+                        acc["token"] = token
+                        account_exists = True
+                        break
+                if not account_exists:
+                    accounts.append({"username": username, "password": password, "token": token})
+                save_accounts(accounts)
+                await account_manager.initialize()
+                update.message.reply_text(f"✅ `{username}` যোগ! Total: {len(accounts)}")
+            else:
+                update.message.reply_text("❌ লগইন ফেইল! ইউজারনেম/পাসওয়ার্ড চেক করুন।")
+        
+        asyncio.run(add_account_async())
         return
+    
     phone = normalize_phone(text)
     if phone and len(phone) == 10:
         if account_manager.get_remaining_checks() <= 0:
-            await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
+            update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
             return
         token_data = account_manager.get_next_available_token()
         if not token_data:
-            await update.message.reply_text("❌ No available accounts! Please login first.")
+            update.message.reply_text("❌ No available accounts! Please login first.")
             return
         token, username = token_data
         stats = load_stats()
         stats["total_checked"] += 1
         stats["today_checked"] += 1
         save_stats(stats)
-        msg = await update.message.reply_text(f"`{phone}` 🔵 Processing...", parse_mode='Markdown')
-        asyncio.create_task(async_add_number_optimized(token, phone, msg, username))
-        context.job_queue.run_once(
-            track_status_optimized, 
-            2,
-            data={
-                'chat_id': update.message.chat_id,
-                'message_id': msg.message_id,
-                'phone': phone,
-                'token': token,
-                'username': username,
-                'checks': 0,
-                'last_status': '🔵 Processing...'
-            }
-        )
+        msg = update.message.reply_text(f"`{phone}` 🔵 Processing...", parse_mode='Markdown')
+        asyncio.run(async_add_number_optimized(token, phone, msg, username))
+        
+        # Start tracking
+        track_status_optimized(context.bot, {
+            'chat_id': update.message.chat_id,
+            'message_id': msg.message_id,
+            'phone': phone,
+            'token': token,
+            'username': username,
+            'checks': 0,
+            'last_status': '🔵 Processing...'
+        })
         return
+    
     if text == "➕ অ্যাকাউন্ট যোগ":
-        await add_account(update, context)
+        add_account(update, context)
     elif text == "📋 অ্যাকাউন্ট লিস্ট":
-        await list_accounts(update, context)
+        list_accounts(update, context)
     elif text == "❓ সাহায্য":
-        await help_command(update, context)
+        help_command(update, context)
     else:
-        await update.message.reply_text("❓ নম্বর পাঠান বা মেনু ব্যবহার করুন!")
-
-async def main_async():
-    # Initialize account manager
-    await account_manager.initialize()
-    print("🤖 Bot initialized successfully!")
-    
-    # Create application
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Add all handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("logout", logout_account))
-    application.add_handler(CommandHandler("admin_users", admin_users))
-    application.add_handler(CommandHandler("restart", restart_bot))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message_optimized))
-    application.add_handler(CallbackQueryHandler(handle_approval, pattern=r"^(allow|deny)_"))
-    application.add_handler(CallbackQueryHandler(handle_user_management, pattern=r"^(user|toggle)_"))
-    application.job_queue.run_repeating(reset_daily_stats, interval=86400, first=0)
-    
-    print("🚀 Bot starting polling...")
-    await application.run_polling()
+        update.message.reply_text("❓ নম্বর পাঠান বা মেনু ব্যবহার করুন!")
 
 def main():
     # Start Flask in a separate thread
@@ -913,8 +903,27 @@ def main():
     flask_thread.start()
     print("🌐 Flask server started on port 10000")
     
-    # Run the bot
-    asyncio.run(main_async())
+    # Initialize account manager
+    asyncio.run(account_manager.initialize())
+    print("🤖 Bot initialized successfully!")
+    
+    # Create updater
+    updater = Updater(BOT_TOKEN, use_context=True)
+    dp = updater.dispatcher
+    
+    # Add all handlers
+    dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(CommandHandler("logout", logout_account))
+    dp.add_handler(CommandHandler("admin_users", admin_users))
+    dp.add_handler(CommandHandler("restart", restart_bot))
+    dp.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message_optimized))
+    dp.add_handler(CallbackQueryHandler(handle_approval, pattern=r"^(allow|deny)_"))
+    dp.add_handler(CallbackQueryHandler(handle_user_management, pattern=r"^(user|toggle)_"))
+    
+    # Start bot
+    print("🚀 Bot starting polling...")
+    updater.start_polling()
+    updater.idle()
 
 if __name__ == "__main__":
     main()
