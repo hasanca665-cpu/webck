@@ -43,7 +43,7 @@ status_map = {
     2: "🔵 In Progress",
     3: "⚠️ Try Again Later",
     4: "🟢 Fresh Number",
-    7: "🚫 Bad Number",
+    7: "🚫 Ban Number",
     5: "🟡 Pending Verification",
     6: "🔴 Blocked",
     8: "🟠 Limited",
@@ -561,7 +561,7 @@ async def track_status_optimized(context: CallbackContext):
         if checks >= 6:
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            timeout_text = f"`{phone}` ⏰ Server Exists)"
+            timeout_text = f"`{phone}` ⏰ Try leter"
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -633,6 +633,8 @@ async def reset_daily_stats(context: CallbackContext):
 # Bot command handlers
 async def start(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
+    users = load_users()
+    
     if user_id == ADMIN_ID:
         keyboard = [
             [KeyboardButton("➕ অ্যাকাউন্ট যোগ"), KeyboardButton("📋 অ্যাকাউন্ট লিস্ট")],
@@ -646,21 +648,15 @@ async def start(update: Update, context: CallbackContext) -> None:
         remaining = account_manager.get_remaining_checks()
         await update.message.reply_text(
             f"🔥 **নম্বর চেকার বট** 👑\n\n"
-            f"📱 **Total Accounts:** {accounts_status['total']}\n"
+            f"📱 **Total Server:** {accounts_status['total']}\n"
             f"✅ **Active Accounts:** {active}\n"
             f"⚡ **Remaining Checks:** {remaining}\n\n"
-            f"📱 **নম্বর পাঠান** যেকোনো format এ:\n"
-            f"`+17828125672` → `7828125672`\n"
-            f"`+1 (782) 812-5672` → `7828125672`\n"
-            f"`7789968875`\n"
-            f"**বা একসাথে অনেকগুলো নম্বর:**\n"
-            f"`902-901-5063`\n`902-918-2386`\n`902-812-0945`\n\n"
-            f"👇 মেনু ব্যবহার করুন",
+            f"📱 **নম্বর পাঠান** যেকোনো format এ",
             reply_markup=reply_markup, 
             parse_mode='Markdown'
         )
         return
-    users = load_users()
+        
     if str(user_id) not in users:
         users[str(user_id)] = {
             "username": update.effective_user.username or update.effective_user.first_name,
@@ -687,30 +683,22 @@ async def start(update: Update, context: CallbackContext) -> None:
             "⏳ Your access request has been sent to admin. Please wait for approval."
         )
         return
+        
     if not users[str(user_id)]["approved"]:
         await update.message.reply_text(
             "⏳ Your access is still pending approval. Please wait for admin to approve."
         )
         return
-    keyboard = [
-        [KeyboardButton("➕ অ্যাকাউন্ট যোগ"), KeyboardButton("📋 অ্যাকাউন্ট লিস্ট")],
-        [KeyboardButton("📊 Statistics"), KeyboardButton("❓ সাহায্য")]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        
+    # Regular users see no keyboard buttons
+    accounts_status = account_manager.get_accounts_status()
     active = account_manager.get_active_count()
     remaining = account_manager.get_remaining_checks()
     await update.message.reply_text(
         f"🔥 **নম্বর চেকার বট**\n\n"
-        f"📱 **Active accounts:** {active}\n"
+        f"📱 **Active Server:** {active}\n"
         f"✅ **Remaining checks:** {remaining}\n\n"
-        f"📱 **নম্বর পাঠান** যেকোনো format এ:\n"
-        f"`+17828125672` → `7828125672`\n"
-        f"`+1 (782) 812-5672` → `7828125672`\n"
-        f"`7789968875`\n"
-        f"**বা একসাথে অনেকগুলো নম্বর:**\n"
-        f"`902-901-5063`\n`902-918-2386`\n`902-812-0945`\n\n"
-        f"👇 মেনু ব্যবহার করুন",
-        reply_markup=reply_markup, 
+        f"📱 **নম্বর পাঠান** যেকোনো format এ",
         parse_mode='Markdown'
     )
 
@@ -829,14 +817,14 @@ async def handle_user_management(update: Update, context: CallbackContext) -> No
             )
 
 async def add_account(update: Update, context: CallbackContext) -> None:
-    if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Admin only command!")
         return
     await update.message.reply_text("👤 `username:password` পাঠান\nযেমন: `HasanCA:HasanCA`", parse_mode='Markdown')
 
 async def list_accounts(update: Update, context: CallbackContext) -> None:
-    if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Admin only command!")
         return
     accounts = load_accounts()
     if not accounts:
@@ -855,8 +843,8 @@ async def list_accounts(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(msg, parse_mode='Markdown')
 
 async def one_click_login(update: Update, context: CallbackContext) -> None:
-    if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Admin only command!")
         return
     processing_msg = await update.message.reply_text("🔄 সব অ্যাকাউন্ট লগইন করা হচ্ছে...")
     successful_logins = await account_manager.login_all_accounts()
@@ -871,8 +859,8 @@ async def one_click_login(update: Update, context: CallbackContext) -> None:
     )
 
 async def one_click_logout(update: Update, context: CallbackContext) -> None:
-    if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Admin only command!")
         return
     processing_msg = await update.message.reply_text("🔄 সব অ্যাকাউন্ট লগআউট করা হচ্ছে...")
     await account_manager.logout_all_accounts()
@@ -897,8 +885,8 @@ async def restart_bot(update: Update, context: CallbackContext) -> None:
     )
 
 async def logout_account(update: Update, context: CallbackContext) -> None:
-    if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Admin only command!")
         return
     if not context.args:
         await update.message.reply_text("🚪 `/logout username`")
@@ -967,23 +955,18 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
         await update.message.reply_text("❌ কোনো ভ্যালিড নম্বর পাওয়া যায়নি!")
         return
     
-    total_numbers = len(numbers)
-    await update.message.reply_text(f"🔍 {total_numbers} টি নম্বর ডিটেক্ট করা হয়েছে... প্রসেসিং শুরু হচ্ছে!")
-    
-    successful_checks = 0
-    failed_checks = 0
-    
+    # Start processing immediately without any notification message
     for phone in numbers:
         if account_manager.get_remaining_checks() <= 0:
+            # Only notify if all accounts are full
             await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
-            failed_checks += 1
-            continue
+            break
             
         token_data = account_manager.get_next_available_token()
         if not token_data:
+            # Only notify if no accounts available
             await update.message.reply_text("❌ No available accounts! Please login first.")
-            failed_checks += 1
-            continue
+            break
             
         token, username = token_data
         stats = load_stats()
@@ -1008,21 +991,6 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
                     'last_status': '🔵 Processing...'
                 }
             )
-        else:
-            print("❌ JobQueue not available, cannot schedule number check")
-        
-        successful_checks += 1
-        await asyncio.sleep(1)  # Small delay between processing numbers
-    
-    # Final summary
-    if successful_checks > 0:
-        await update.message.reply_text(
-            f"✅ **প্রসেসিং সম্পূর্ণ!**\n\n"
-            f"📊 **রেজাল্ট:**\n"
-            f"• সফল: {successful_checks} টি নম্বর\n"
-            f"• ব্যর্থ: {failed_checks} টি নম্বর\n"
-            f"• মোট: {total_numbers} টি নম্বর"
-        )
 
 # Main message handler
 async def handle_message_optimized(update: Update, context: CallbackContext) -> None:
@@ -1031,25 +999,38 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
         return
     text = update.message.text.strip()
     
-    # Handle menu buttons
-    if text == "📊 Statistics":
-        await show_stats(update, context)
-        return
-    if text == "👥 User Management" and update.effective_user.id == ADMIN_ID:
-        await admin_users(update, context)
-        return
-    if text == "🚀 ওয়ান-ক্লিক লগইন":
-        await one_click_login(update, context)
-        return
-    if text == "🚪 ওয়ান-ক্লিক লগআউট":
-        await one_click_logout(update, context)
-        return
-    if text == "🔄 রিস্টার্ট বট":
-        await restart_bot(update, context)
-        return
+    # Handle menu buttons (only for admin)
+    if update.effective_user.id == ADMIN_ID:
+        if text == "📊 Statistics":
+            await show_stats(update, context)
+            return
+        if text == "👥 User Management":
+            await admin_users(update, context)
+            return
+        if text == "🚀 ওয়ান-ক্লিক লগইন":
+            await one_click_login(update, context)
+            return
+        if text == "🚪 ওয়ান-ক্লিক লগআউট":
+            await one_click_logout(update, context)
+            return
+        if text == "🔄 রিস্টার্ট বট":
+            await restart_bot(update, context)
+            return
+        if text == "➕ অ্যাকাউন্ট যোগ":
+            await add_account(update, context)
+            return
+        if text == "📋 অ্যাকাউন্ট লিস্ট":
+            await list_accounts(update, context)
+            return
+        if text == "❓ সাহায্য":
+            await help_command(update, context)
+            return
     
-    # Handle account addition (username:password)
+    # Handle account addition (username:password) - only for admin
     if ':' in text and len(text.split(':')) == 2:
+        if update.effective_user.id != ADMIN_ID:
+            await update.message.reply_text("❌ Admin only command!")
+            return
         username, password = text.split(':')
         token = await login_api_async(username, password)
         if token:
@@ -1074,7 +1055,7 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
     numbers = extract_phone_numbers(text)
     if numbers:
         if len(numbers) == 1:
-            # Single number processing (original logic)
+            # Single number processing
             phone = numbers[0]
             if account_manager.get_remaining_checks() <= 0:
                 await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
@@ -1104,22 +1085,16 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
                         'last_status': '🔵 Processing...'
                     }
                 )
-            else:
-                print("❌ JobQueue not available, cannot schedule number check")
         else:
             # Multiple numbers processing
             await process_multiple_numbers(update, context, text)
         return
     
-    # Handle menu buttons
-    if text == "➕ অ্যাকাউন্ট যোগ":
-        await add_account(update, context)
-    elif text == "📋 অ্যাকাউন্ট লিস্ট":
-        await list_accounts(update, context)
-    elif text == "❓ সাহায্য":
-        await help_command(update, context)
-    else:
+    # If no numbers found and not a command
+    if update.effective_user.id == ADMIN_ID:
         await update.message.reply_text("❓ নম্বর পাঠান বা মেনু ব্যবহার করুন!")
+    else:
+        await update.message.reply_text("❓ শুধু নম্বর পাঠান!")
 
 # Run FastAPI server
 def run_fastapi():
