@@ -1,10 +1,13 @@
+import os
+import asyncio
+import threading
 import requests
 import time
 import json
 import re
 import logging
-import asyncio
 import aiohttp
+from flask import Flask
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 from datetime import datetime, timedelta
@@ -21,12 +24,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = "6224828344:AAF8T-lhNZDl3E8dBRzK7p6NJtIr6Dzj0b8"
+# Flask app for keep-alive
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "🤖 Python Number Checker Bot is Running!"
+
+def run_flask():
+    port = int(os.environ.get('PORT', 10000))
+    app.run(host='0.0.0.0', port=port, debug=False)
+
+BOT_TOKEN = os.environ.get('BOT_TOKEN', "6224828344:AAF8T-lhNZDl3E8dBRzK7p6NJtIr6Dzj0b8")
 BASE_URL = "http://8.222.182.223:8081"
 ACCOUNTS_FILE = "accounts.json"
 USERS_FILE = "users.json"
 STATS_FILE = "stats.json"
-ADMIN_ID = 5624278091
+ADMIN_ID = int(os.environ.get('ADMIN_ID', 5624278091))
 
 MAX_PER_ACCOUNT = 5
 
@@ -51,7 +65,7 @@ status_map = {
     -1: "❌ Token Expired",
     -2: "❌ API Error",
     -3: "❌ No Data Found",
-    16: "🚫 Already Exists"  # Status for "cannot register, already exists"
+    16: "🚫 Already Exists"
 }
 
 # Load accounts
@@ -133,7 +147,7 @@ async def add_number_async(session, token, cc, phone, retry_count=2):
                 elif response.status == 401:
                     logger.error(f"❌ Token expired during add for {phone}, attempt {attempt + 1}")
                     continue
-                elif response.status in (400, 409):  # Handle "already exists" at add stage
+                elif response.status in (400, 409):
                     logger.error(f"❌ Number {phone} already exists or invalid, status {response.status}")
                     return False
                 else:
@@ -162,11 +176,10 @@ async def get_status_async(session, token, phone):
                 logger.error(f"❌ Login required for {phone}")
                 return -1, "❌ Token Expired", None
             
-            # Check for "already exists" or similar messages
             if res.get('msg') and any(keyword in res.get('msg').lower() for keyword in ["already exists", "cannot register", "number exists"]):
                 logger.error(f"❌ Number {phone} already exists or cannot register")
                 return 16, "🚫 Already Exists", None
-            if res.get('code') in (400, 409):  # Additional error codes for "already exists"
+            if res.get('code') in (400, 409):
                 logger.error(f"❌ Number {phone} already exists, code {res.get('code')}")
                 return 16, "🚫 Already Exists", None
             
@@ -178,7 +191,6 @@ async def get_status_async(session, token, phone):
                 status_name = status_map.get(status_code, f"🔸 Status {status_code}")
                 return status_code, status_name, record_id
             
-            # Immediate recheck if no records found
             async with session.get(status_url, headers=headers, timeout=5) as recheck_response:
                 try:
                     res = await recheck_response.json()
@@ -372,7 +384,6 @@ async def track_status_optimized(context: CallbackContext):
                     logger.error(f"❌ Message update failed for {phone}: {e}")
             return
         
-        # Only update message if status has changed
         if status_name != last_status:
             new_text = f"`{phone}` {status_name}"
             try:
@@ -403,7 +414,7 @@ async def track_status_optimized(context: CallbackContext):
                     logger.error(f"❌ Final message update failed for {phone}: {e}")
             return
         
-        if checks >= 6:  # Reduced max checks to avoid long delays
+        if checks >= 6:
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
             timeout_text = f"`{phone}` ⏰ Timeout (Last: {status_name})"
@@ -419,7 +430,6 @@ async def track_status_optimized(context: CallbackContext):
                     logger.error(f"❌ Timeout message update failed for {phone}: {e}")
             return
         
-        # Polling interval for status checks (1 second to allow API processing)
         next_check = 1
         context.job_queue.run_once(
             track_status_optimized, 
@@ -784,7 +794,6 @@ async def async_add_number_optimized(token, phone, msg, username):
             if added:
                 await msg.edit_text(f"`{phone}` 🔵 In Progress", parse_mode='Markdown')
             else:
-                # Check status immediately if add fails (possible "already exists")
                 status_code, status_name, record_id = await get_status_async(session, token, phone)
                 if status_code == 16:
                     await msg.edit_text(f"`{phone}` 🚫 Already Exists", parse_mode='Markdown')
@@ -856,7 +865,7 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
         asyncio.create_task(async_add_number_optimized(token, phone, msg, username))
         context.job_queue.run_once(
             track_status_optimized, 
-            2,  # Start checking after 2 seconds to allow number addition
+            2,
             data={
                 'chat_id': update.message.chat_id,
                 'message_id': msg.message_id,
@@ -877,41 +886,15 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
     else:
         await update.message.reply_text("❓ নম্বর পাঠান বা মেনু ব্যবহার করুন!")
 
-import os
-from flask import Flask
-
-# Keep alive for Render.com
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "🤖 Python Number Checker Bot is Running!"
-
-def run_flask():
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
-
-# Modified main function
-def main():
-    import threading
+async def main_async():
+    # Initialize account manager
+    await account_manager.initialize()
+    print("🤖 Bot initialized successfully!")
     
-    # Start Flask server in a separate thread
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-    
-    # Initialize and run your bot
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    
-    async def initialize_bot():
-        await account_manager.initialize()
-        print("🤖 Bot initialized successfully!")
-    
-    loop.run_until_complete(initialize_bot())
-    
+    # Create application
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # Add all your handlers
+    # Add all handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("logout", logout_account))
     application.add_handler(CommandHandler("admin_users", admin_users))
@@ -921,12 +904,17 @@ def main():
     application.add_handler(CallbackQueryHandler(handle_user_management, pattern=r"^(user|toggle)_"))
     application.job_queue.run_repeating(reset_daily_stats, interval=86400, first=0)
     
-    print("🚀 Bot starting...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    print("🚀 Bot starting polling...")
+    await application.run_polling()
+
+def main():
+    # Start Flask in a separate thread
+    flask_thread = threading.Thread(target=run_flask, daemon=True)
+    flask_thread.start()
+    print("🌐 Flask server started on port 10000")
+    
+    # Run the bot
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()
-
-
-
-
