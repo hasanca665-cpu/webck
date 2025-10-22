@@ -425,15 +425,18 @@ async def track_status_optimized(context: CallbackContext):
                     logger.error(f"❌ Timeout message update failed for {phone}: {e}")
             return
         
-        context.job_queue.run_once(
-            track_status_optimized, 
-            1,  # Check every 1 second
-            data={
-                **data, 
-                'checks': checks + 1, 
-                'last_status': status_name
-            }
-        )
+        if context.job_queue:
+            context.job_queue.run_once(
+                track_status_optimized, 
+                1,  # Check every 1 second
+                data={
+                    **data, 
+                    'checks': checks + 1, 
+                    'last_status': status_name
+                }
+            )
+        else:
+            logger.error("❌ JobQueue not available, cannot schedule status check")
     except Exception as e:
         logger.error(f"❌ Tracking error for {phone}: {e}")
         account_manager.release_token(username)
@@ -857,19 +860,22 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
         save_stats(stats)
         msg = await update.message.reply_text(f"`{phone}` 🔵 Processing...", parse_mode='Markdown')
         asyncio.create_task(async_add_number_optimized(token, phone, msg, username))
-        context.job_queue.run_once(
-            track_status_optimized, 
-            2,  # Start checking after 2 seconds
-            data={
-                'chat_id': update.message.chat_id,
-                'message_id': msg.message_id,
-                'phone': phone,
-                'token': token,
-                'username': username,
-                'checks': 0,
-                'last_status': '🔵 Processing...'
-            }
-        )
+        if context.job_queue:
+            context.job_queue.run_once(
+                track_status_optimized, 
+                2,  # Start checking after 2 seconds
+                data={
+                    'chat_id': update.message.chat_id,
+                    'message_id': msg.message_id,
+                    'phone': phone,
+                    'token': token,
+                    'username': username,
+                    'checks': 0,
+                    'last_status': '🔵 Processing...'
+                }
+            )
+        else:
+            logger.error("❌ JobQueue not available, cannot schedule number check")
         return
     if text == "➕ অ্যাকাউন্ট যোগ":
         await add_account(update, context)
@@ -910,7 +916,10 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message_optimized))
     application.add_handler(CallbackQueryHandler(handle_approval, pattern=r"^(allow|deny)_"))
     application.add_handler(CallbackQueryHandler(handle_user_management, pattern=r"^(user|toggle)_"))
-    application.job_queue.run_repeating(reset_daily_stats, interval=86400, first=0)
+    if application.job_queue:
+        application.job_queue.run_repeating(reset_daily_stats, interval=86400, first=0)
+    else:
+        logger.error("❌ JobQueue not available, daily stats reset not scheduled")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
