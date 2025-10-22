@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from telegram.error import BadRequest
 from fastapi import FastAPI
 import uvicorn
+import random
 
 # Configure logging to focus on errors only
 logging.basicConfig(
@@ -69,6 +70,56 @@ async def root():
 @app.get("/ping")
 async def ping():
     return {"message": "Bot is alive!"}
+
+# Enhanced keep-alive system
+async def keep_alive_enhanced():
+    """Enhanced keep-alive with multiple strategies"""
+    keep_alive_urls = [
+        "https://webck.onrender.com/ping
+        "
+    ]
+    
+    while True:
+        try:
+            for url in keep_alive_urls:
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(url, timeout=10) as response:
+                            print(f"🔄 Keep-alive ping to {url}: Status {response.status}")
+                            await asyncio.sleep(2)  # Small delay between pings
+                except Exception as e:
+                    print(f"⚠️ Keep-alive ping failed for {url}: {e}")
+            
+            # Wait for next ping cycle (5 minutes)
+            await asyncio.sleep(5 * 60)
+            
+        except Exception as e:
+            print(f"❌ Keep-alive system error: {e}")
+            await asyncio.sleep(5 * 60)
+
+async def random_ping():
+    """Additional random pings to avoid pattern detection"""
+    while True:
+        try:
+            random_time = random.randint(3 * 60, 8 * 60)  # 3-8 minutes
+            await asyncio.sleep(random_time)
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get("https://webck.onrender.com/ping", timeout=10) as response:
+                    print(f"🎲 Random ping sent: Status {response.status}")
+                    
+        except Exception as e:
+            print(f"⚠️ Random ping failed: {e}")
+
+async def immediate_ping():
+    """Immediate ping on startup"""
+    await asyncio.sleep(30)  # Wait 30 seconds after startup
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://webck.onrender.com/ping", timeout=10) as response:
+                print(f"🚀 Immediate startup ping: Status {response.status}")
+    except Exception as e:
+        print(f"⚠️ Immediate ping failed: {e}")
 
 # Enhanced file operations with error handling
 def load_accounts():
@@ -211,14 +262,25 @@ async def login_api_async(username, password):
         print(f"❌ Login error for {username}: {e}")
         return None
 
-# Normalize phone
-def normalize_phone(input_str):
-    digits = re.sub(r'\D', '', input_str)
-    if digits.startswith('1'):
-        digits = digits[1:]
-    if len(digits) == 10:
-        return digits
-    return None
+# Normalize phone - Improved to extract multiple numbers
+def extract_phone_numbers(text):
+    # Find all sequences of digits that could be phone numbers
+    phone_pattern = r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b|\b\d{10}\b'
+    matches = re.findall(phone_pattern, text)
+    
+    normalized_numbers = []
+    for match in matches:
+        # Remove all non-digit characters
+        digits = re.sub(r'\D', '', match)
+        
+        # Handle country code if present
+        if len(digits) == 11 and digits.startswith('1'):
+            digits = digits[1:]
+        
+        if len(digits) == 10:
+            normalized_numbers.append(digits)
+    
+    return list(set(normalized_numbers))  # Remove duplicates
 
 # Async add number
 async def add_number_async(session, token, cc, phone, retry_count=2):
@@ -500,7 +562,7 @@ async def track_status_optimized(context: CallbackContext):
         if checks >= 6:
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            timeout_text = f"`{phone}` ⏰ Timeout (Last: {status_name})"
+            timeout_text = f"`{phone}` ⏰ Server Exists)"
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -591,7 +653,9 @@ async def start(update: Update, context: CallbackContext) -> None:
             f"📱 **নম্বর পাঠান** যেকোনো format এ:\n"
             f"`+17828125672` → `7828125672`\n"
             f"`+1 (782) 812-5672` → `7828125672`\n"
-            f"`7789968875`\n\n"
+            f"`7789968875`\n"
+            f"**বা একসাথে অনেকগুলো নম্বর:**\n"
+            f"`902-901-5063`\n`902-918-2386`\n`902-812-0945`\n\n"
             f"👇 মেনু ব্যবহার করুন",
             reply_markup=reply_markup, 
             parse_mode='Markdown'
@@ -643,7 +707,9 @@ async def start(update: Update, context: CallbackContext) -> None:
         f"📱 **নম্বর পাঠান** যেকোনো format এ:\n"
         f"`+17828125672` → `7828125672`\n"
         f"`+1 (782) 812-5672` → `7828125672`\n"
-        f"`7789968875`\n\n"
+        f"`7789968875`\n"
+        f"**বা একসাথে অনেকগুলো নম্বর:**\n"
+        f"`902-901-5063`\n`902-918-2386`\n`902-812-0945`\n\n"
         f"👇 মেনু ব্যবহার করুন",
         reply_markup=reply_markup, 
         parse_mode='Markdown'
@@ -893,12 +959,80 @@ async def async_add_number_optimized(token, phone, msg, username):
         await msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
         account_manager.release_token(username)
 
+# Process multiple numbers from a single message
+async def process_multiple_numbers(update: Update, context: CallbackContext, text: str):
+    """Process multiple phone numbers from a single message"""
+    numbers = extract_phone_numbers(text)
+    
+    if not numbers:
+        await update.message.reply_text("❌ কোনো ভ্যালিড নম্বর পাওয়া যায়নি!")
+        return
+    
+    total_numbers = len(numbers)
+    await update.message.reply_text(f"🔍 {total_numbers} টি নম্বর ডিটেক্ট করা হয়েছে... প্রসেসিং শুরু হচ্ছে!")
+    
+    successful_checks = 0
+    failed_checks = 0
+    
+    for phone in numbers:
+        if account_manager.get_remaining_checks() <= 0:
+            await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
+            failed_checks += 1
+            continue
+            
+        token_data = account_manager.get_next_available_token()
+        if not token_data:
+            await update.message.reply_text("❌ No available accounts! Please login first.")
+            failed_checks += 1
+            continue
+            
+        token, username = token_data
+        stats = load_stats()
+        stats["total_checked"] += 1
+        stats["today_checked"] += 1
+        save_stats(stats)
+        
+        msg = await update.message.reply_text(f"`{phone}` 🔵 Processing...", parse_mode='Markdown')
+        asyncio.create_task(async_add_number_optimized(token, phone, msg, username))
+        
+        if context.job_queue:
+            context.job_queue.run_once(
+                track_status_optimized, 
+                2,
+                data={
+                    'chat_id': update.message.chat_id,
+                    'message_id': msg.message_id,
+                    'phone': phone,
+                    'token': token,
+                    'username': username,
+                    'checks': 0,
+                    'last_status': '🔵 Processing...'
+                }
+            )
+        else:
+            print("❌ JobQueue not available, cannot schedule number check")
+        
+        successful_checks += 1
+        await asyncio.sleep(1)  # Small delay between processing numbers
+    
+    # Final summary
+    if successful_checks > 0:
+        await update.message.reply_text(
+            f"✅ **প্রসেসিং সম্পূর্ণ!**\n\n"
+            f"📊 **রেজাল্ট:**\n"
+            f"• সফল: {successful_checks} টি নম্বর\n"
+            f"• ব্যর্থ: {failed_checks} টি নম্বর\n"
+            f"• মোট: {total_numbers} টি নম্বর"
+        )
+
 # Main message handler
 async def handle_message_optimized(update: Update, context: CallbackContext) -> None:
     if not is_user_approved(update.effective_user.id):
         await update.message.reply_text("❌ You are not approved to use this bot!")
         return
     text = update.message.text.strip()
+    
+    # Handle menu buttons
     if text == "📊 Statistics":
         await show_stats(update, context)
         return
@@ -914,6 +1048,8 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
     if text == "🔄 রিস্টার্ট বট":
         await restart_bot(update, context)
         return
+    
+    # Handle account addition (username:password)
     if ':' in text and len(text.split(':')) == 2:
         username, password = text.split(':')
         token = await login_api_async(username, password)
@@ -934,39 +1070,49 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
         else:
             await update.message.reply_text("❌ লগইন ফেইল! ইউজারনেম/পাসওয়ার্ড চেক করুন।")
         return
-    phone = normalize_phone(text)
-    if phone and len(phone) == 10:
-        if account_manager.get_remaining_checks() <= 0:
-            await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
-            return
-        token_data = account_manager.get_next_available_token()
-        if not token_data:
-            await update.message.reply_text("❌ No available accounts! Please login first.")
-            return
-        token, username = token_data
-        stats = load_stats()
-        stats["total_checked"] += 1
-        stats["today_checked"] += 1
-        save_stats(stats)
-        msg = await update.message.reply_text(f"`{phone}` 🔵 Processing...", parse_mode='Markdown')
-        asyncio.create_task(async_add_number_optimized(token, phone, msg, username))
-        if context.job_queue:
-            context.job_queue.run_once(
-                track_status_optimized, 
-                2,
-                data={
-                    'chat_id': update.message.chat_id,
-                    'message_id': msg.message_id,
-                    'phone': phone,
-                    'token': token,
-                    'username': username,
-                    'checks': 0,
-                    'last_status': '🔵 Processing...'
-                }
-            )
+    
+    # Handle phone numbers (single or multiple)
+    numbers = extract_phone_numbers(text)
+    if numbers:
+        if len(numbers) == 1:
+            # Single number processing (original logic)
+            phone = numbers[0]
+            if account_manager.get_remaining_checks() <= 0:
+                await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
+                return
+            token_data = account_manager.get_next_available_token()
+            if not token_data:
+                await update.message.reply_text("❌ No available accounts! Please login first.")
+                return
+            token, username = token_data
+            stats = load_stats()
+            stats["total_checked"] += 1
+            stats["today_checked"] += 1
+            save_stats(stats)
+            msg = await update.message.reply_text(f"`{phone}` 🔵 Processing...", parse_mode='Markdown')
+            asyncio.create_task(async_add_number_optimized(token, phone, msg, username))
+            if context.job_queue:
+                context.job_queue.run_once(
+                    track_status_optimized, 
+                    2,
+                    data={
+                        'chat_id': update.message.chat_id,
+                        'message_id': msg.message_id,
+                        'phone': phone,
+                        'token': token,
+                        'username': username,
+                        'checks': 0,
+                        'last_status': '🔵 Processing...'
+                    }
+                )
+            else:
+                print("❌ JobQueue not available, cannot schedule number check")
         else:
-            print("❌ JobQueue not available, cannot schedule number check")
+            # Multiple numbers processing
+            await process_multiple_numbers(update, context, text)
         return
+    
+    # Handle menu buttons
     if text == "➕ অ্যাকাউন্ট যোগ":
         await add_account(update, context)
     elif text == "📋 অ্যাকাউন্ট লিস্ট":
@@ -975,17 +1121,6 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
         await help_command(update, context)
     else:
         await update.message.reply_text("❓ নম্বর পাঠান বা মেনু ব্যবহার করুন!")
-
-# Keep-alive function
-async def keep_alive():
-    while True:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get("https://webck.onrender.com/ping") as response:
-                    print(f"{datetime.now().isoformat()}: Pinged - Status {response.status}")
-        except Exception as e:
-            print(f"{datetime.now().isoformat()}: Ping error: {e}")
-        await asyncio.sleep(14 * 60)  # 14 minutes
 
 # Run FastAPI server
 def run_fastapi():
@@ -1003,8 +1138,13 @@ def main():
     
     async def initialize_bot():
         await account_manager.initialize()
-        asyncio.create_task(keep_alive())  # Start keep-alive
-        print("🤖 Bot initialized successfully!")
+        
+        # Start enhanced keep-alive system
+        asyncio.create_task(keep_alive_enhanced())
+        asyncio.create_task(random_ping()) 
+        asyncio.create_task(immediate_ping())
+        
+        print("🤖 Bot initialized successfully with enhanced keep-alive!")
     
     loop.run_until_complete(initialize_bot())
     
@@ -1025,7 +1165,7 @@ def main():
     else:
         print("❌ JobQueue not available, daily stats reset not scheduled")
     
-    print("🚀 Bot starting polling...")
+    print("🚀 Bot starting polling with 24/7 keep-alive...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
