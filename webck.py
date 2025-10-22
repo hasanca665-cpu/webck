@@ -1,39 +1,39 @@
-import os
-import asyncio
-import threading
 import requests
 import time
 import json
 import re
 import logging
+import asyncio
 import aiohttp
+import os
+import fcntl  # For file locking
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext, CallbackQueryHandler
 from datetime import datetime, timedelta
 from telegram.error import BadRequest
 from fastapi import FastAPI
 import uvicorn
+import threading
 
-# Configure logging to focus on errors only
+# Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', 
     level=logging.INFO,
     handlers=[
+        logging.FileHandler("bot_debug.log", encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = "6224828344:AAHUAHnOSaB5DUGfCtg9QqCWnNkDBRhxQE0"
+BOT_TOKEN = os.getenv("BOT_TOKEN", "6224828344:AAHUAHnOSaB5DUGfCtg9QqCWnNkDBRhxQE0")
 BASE_URL = "http://8.222.182.223:8081"
-
-# File paths with Render.com compatibility
-ACCOUNTS_FILE = "/tmp/accounts.json" if 'RENDER' in os.environ else "accounts.json"
-USERS_FILE = "/tmp/users.json" if 'RENDER' in os.environ else "users.json" 
-STATS_FILE = "/tmp/stats.json" if 'RENDER' in os.environ else "stats.json"
-
+ACCOUNTS_FILE = "/opt/render/project/src/accounts.json"
+USERS_FILE = "/opt/render/project/src/users.json"
+STATS_FILE = "/opt/render/project/src/stats.json"
 ADMIN_ID = 5624278091
 MAX_PER_ACCOUNT = 5
+RENDER_URL = "https://webck.onrender.com"
 
 # Status map
 status_map = {
@@ -62,117 +62,82 @@ status_map = {
 # FastAPI for /ping endpoint
 app = FastAPI()
 
-@app.get("/")
-async def root():
-    return {"message": "🤖 Python Number Checker Bot is Running!"}
-
 @app.get("/ping")
 async def ping():
     return {"message": "Bot is alive!"}
 
-# Enhanced file operations with error handling
+# Ensure file exists
+def ensure_file(file_path):
+    if not os.path.exists(file_path):
+        logger.info(f"Creating file: {file_path}")
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                json.dump([], f, indent=4, ensure_ascii=False)
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        except Exception as e:
+            logger.error(f"❌ Failed to create file {file_path}: {e}")
+
+# Load accounts
 def load_accounts():
+    ensure_file(ACCOUNTS_FILE)
     try:
-        # Try multiple possible file locations
-        possible_paths = [
-            ACCOUNTS_FILE,
-            "accounts.json",
-            "/tmp/accounts.json",
-            "./accounts.json"
-        ]
-        
-        for file_path in possible_paths:
-            try:
-                if os.path.exists(file_path):
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        data = json.load(f)
-                        print(f"✅ Loaded accounts from {file_path}: {len(data)} accounts")
-                        return data
-            except Exception as e:
-                print(f"❌ Error loading from {file_path}: {e}")
-                continue
-        
-        print("ℹ️ No accounts file found, starting fresh")
-        return []
-        
+        with open(ACCOUNTS_FILE, 'r', encoding='utf-8') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            data = json.load(f)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            logger.info(f"Loaded accounts: {data}")
+            return data
     except Exception as e:
-        print(f"❌ Critical error loading accounts: {e}")
+        logger.error(f"❌ Error loading accounts.json: {e}")
         return []
 
 def save_accounts(accounts):
     try:
-        # Try multiple possible file locations
-        possible_paths = [
-            ACCOUNTS_FILE,
-            "accounts.json", 
-            "/tmp/accounts.json"
-        ]
-        
-        success = False
-        for file_path in possible_paths:
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(accounts, f, indent=4, ensure_ascii=False)
-                print(f"✅ Saved {len(accounts)} accounts to {file_path}")
-                success = True
-                break
-            except Exception as e:
-                print(f"❌ Error saving to {file_path}: {e}")
-                continue
-        
-        if not success:
-            print("❌ Failed to save accounts to any location")
-            
+        with open(ACCOUNTS_FILE, 'w', encoding='utf-8') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            json.dump(accounts, f, indent=4, ensure_ascii=False)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        logger.info(f"Saved accounts: {accounts}")
     except Exception as e:
-        print(f"❌ Critical error saving accounts: {e}")
+        logger.error(f"❌ Error saving accounts.json: {e}")
 
+# Load users
 def load_users():
+    ensure_file(USERS_FILE)
     try:
-        possible_paths = [USERS_FILE, "users.json", "/tmp/users.json", "./users.json"]
-        for file_path in possible_paths:
-            try:
-                if os.path.exists(file_path):
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        return json.load(f)
-            except:
-                continue
-        return {}
+        with open(USERS_FILE, 'r', encoding='utf-8') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            data = json.load(f)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            logger.info(f"Loaded users: {data}")
+            return data
     except Exception as e:
-        print(f"❌ Error loading users: {e}")
+        logger.error(f"❌ Error loading users.json: {e}")
         return {}
 
 def save_users(users):
     try:
-        possible_paths = [USERS_FILE, "users.json", "/tmp/users.json"]
-        for file_path in possible_paths:
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(users, f, indent=4, ensure_ascii=False)
-                break
-            except:
-                continue
+        with open(USERS_FILE, 'w', encoding='utf-8') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            json.dump(users, f, indent=4, ensure_ascii=False)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        logger.info(f"Saved users: {users}")
     except Exception as e:
-        print(f"❌ Error saving users: {e}")
+        logger.error(f"❌ Error saving users.json: {e}")
 
+# Load stats
 def load_stats():
+    ensure_file(STATS_FILE)
     try:
-        possible_paths = [STATS_FILE, "stats.json", "/tmp/stats.json", "./stats.json"]
-        for file_path in possible_paths:
-            try:
-                if os.path.exists(file_path):
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        return json.load(f)
-            except:
-                continue
-        return {
-            "total_checked": 0, 
-            "total_deleted": 0, 
-            "today_checked": 0, 
-            "today_deleted": 0,
-            "last_reset": datetime.now().isoformat()
-        }
+        with open(STATS_FILE, 'r', encoding='utf-8') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            data = json.load(f)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            logger.info(f"Loaded stats: {data}")
+            return data
     except Exception as e:
-        print(f"❌ Error loading stats: {e}")
+        logger.error(f"❌ Error loading stats.json: {e}")
         return {
             "total_checked": 0, 
             "total_deleted": 0, 
@@ -183,32 +148,30 @@ def load_stats():
 
 def save_stats(stats):
     try:
-        possible_paths = [STATS_FILE, "stats.json", "/tmp/stats.json"]
-        for file_path in possible_paths:
-            try:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(stats, f, indent=4, ensure_ascii=False)
-                break
-            except:
-                continue
+        with open(STATS_FILE, 'w', encoding='utf-8') as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            json.dump(stats, f, indent=4, ensure_ascii=False)
+            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        logger.info(f"Saved stats: {stats}")
     except Exception as e:
-        print(f"❌ Error saving stats: {e}")
+        logger.error(f"❌ Error saving stats.json: {e}")
 
 # Async login
 async def login_api_async(username, password):
     try:
         async with aiohttp.ClientSession() as session:
             payload = {"account": username, "password": password, "identity": "Member"}
-            async with session.post(f"{BASE_URL}/user/login", json=payload, timeout=10) as response:
+            async with session.post(f"{BASE_URL}/user/login", json=payload, timeout=7) as response:
+                logger.info(f"Login attempt for {username}: Status {response.status}")
                 if response.status == 200:
                     data = await response.json()
+                    logger.info(f"Login response for {username}: {data}")
                     if data and "data" in data and "token" in data["data"]:
-                        print(f"✅ Login successful for {username}")
                         return data["data"]["token"]
-                print(f"❌ Login failed: {username} - Status: {response.status}")
+                logger.error(f"❌ Login failed for {username}: Status {response.status}, Response {await response.text()}")
                 return None
     except Exception as e:
-        print(f"❌ Login error for {username}: {e}")
+        logger.error(f"❌ Login error for {username}: {e}")
         return None
 
 # Normalize phone
@@ -226,20 +189,20 @@ async def add_number_async(session, token, cc, phone, retry_count=2):
         try:
             headers = {"Admin-Token": token}
             add_url = f"{BASE_URL}/z-number-base/addNum?cc={cc}&phoneNum={phone}&smsStatus=2"
-            async with session.post(add_url, headers=headers, timeout=10) as response:
+            async with session.post(add_url, headers=headers, timeout=7) as response:
+                logger.info(f"Add number attempt for {phone}: Status {response.status}")
                 if response.status == 200:
-                    print(f"✅ Number {phone} added successfully")
                     return True
                 elif response.status == 401:
-                    print(f"❌ Token expired during add for {phone}, attempt {attempt + 1}")
+                    logger.error(f"❌ Token expired during add for {phone}, attempt {attempt + 1}")
                     continue
                 elif response.status in (400, 409):
-                    print(f"❌ Number {phone} already exists or invalid, status {response.status}")
+                    logger.error(f"❌ Number {phone} already exists or invalid, status {response.status}")
                     return False
                 else:
-                    print(f"❌ Add failed for {phone} with status {response.status}")
+                    logger.error(f"❌ Add failed for {phone} with status {response.status}")
         except Exception as e:
-            print(f"❌ Add number error for {phone} (attempt {attempt + 1}): {e}")
+            logger.error(f"❌ Add number error for {phone} (attempt {attempt + 1}): {e}")
     return False
 
 # Status checking
@@ -247,26 +210,28 @@ async def get_status_async(session, token, phone):
     try:
         headers = {"Admin-Token": token}
         status_url = f"{BASE_URL}/z-number-base/getAullNum?page=1&pageSize=15&phoneNum={phone}"
-        async with session.get(status_url, headers=headers, timeout=10) as response:
+        async with session.get(status_url, headers=headers, timeout=7) as response:
+            logger.info(f"Status check for {phone}: Status {response.status}")
             if response.status == 401:
-                print(f"❌ Token expired for {phone}")
+                logger.error(f"❌ Token expired for {phone}")
                 return -1, "❌ Token Expired", None
             
             try:
                 res = await response.json()
+                logger.info(f"Status response for {phone}: {res}")
             except json.JSONDecodeError as e:
-                print(f"❌ JSON decode error for {phone}: {e}")
+                logger.error(f"❌ JSON decode error for {phone}: {e}")
                 return -2, "❌ API Error", None
             
             if res.get('code') == 28004:
-                print(f"❌ Login required for {phone}")
+                logger.error(f"❌ Login required for {phone}")
                 return -1, "❌ Token Expired", None
             
             if res.get('msg') and any(keyword in res.get('msg').lower() for keyword in ["already exists", "cannot register", "number exists"]):
-                print(f"❌ Number {phone} already exists or cannot register")
+                logger.error(f"❌ Number {phone} already exists or cannot register")
                 return 16, "🚫 Already Exists", None
             if res.get('code') in (400, 409):
-                print(f"❌ Number {phone} already exists, code {res.get('code')}")
+                logger.error(f"❌ Number {phone} already exists, code {res.get('code')}")
                 return 16, "🚫 Already Exists", None
             
             if (res and "data" in res and "records" in res["data"] and 
@@ -277,9 +242,30 @@ async def get_status_async(session, token, phone):
                 status_name = status_map.get(status_code, f"🔸 Status {status_code}")
                 return status_code, status_name, record_id
             
+            async with session.get(status_url, headers=headers, timeout=7) as recheck_response:
+                try:
+                    res = await recheck_response.json()
+                    logger.info(f"Recheck status response for {phone}: {res}")
+                    if res.get('msg') and any(keyword in res.get('msg').lower() for keyword in ["already exists", "cannot register", "number exists"]):
+                        logger.error(f"❌ Number {phone} already exists or cannot register (recheck)")
+                        return 16, "🚫 Already Exists", None
+                    if res.get('code') in (400, 409):
+                        logger.error(f"❌ Number {phone} already exists, code {res.get('code')} (recheck)")
+                        return 16, "🚫 Already Exists", None
+                    if (res and "data" in res and "records" in res["data"] and 
+                        res["data"]["records"] and len(res["data"]["records"]) > 0):
+                        record = res["data"]["records"][0]
+                        status_code = record.get("registrationStatus")
+                        record_id = record.get("id")
+                        status_name = status_map.get(status_code, f"🔸 Status {status_code}")
+                        return status_code, status_name, record_id
+                except json.JSONDecodeError as e:
+                    logger.error(f"❌ JSON decode error on recheck for {phone}: {e}")
+                    return -2, "❌ API Error", None
+            
             return None, "🔵 Checking...", None
     except Exception as e:
-        print(f"❌ Status error for {phone}: {e}")
+        logger.error(f"❌ Status error for {phone}: {e}")
         return -2, "❌ Error", None
 
 # Async delete
@@ -287,37 +273,33 @@ async def delete_single_number_async(session, token, record_id, username):
     try:
         headers = {"Admin-Token": token}
         delete_url = f"{BASE_URL}/z-number-base/deleteNum/{record_id}"
-        async with session.delete(delete_url, headers=headers, timeout=10) as response:
+        async with session.delete(delete_url, headers=headers, timeout=7) as response:
+            logger.info(f"Delete attempt for {record_id}: Status {response.status}")
             if response.status == 200:
                 return True
             else:
-                print(f"❌ Delete failed for {record_id}: Status {response.status}")
+                logger.error(f"❌ Delete failed for {record_id}: Status {response.status}")
                 return False
     except Exception as e:
-        print(f"❌ Delete error for {record_id}: {e}")
+        logger.error(f"❌ Delete error for {record_id}: {e}")
         return False
 
 # Account Manager
 class AccountManager:
     def __init__(self):
-        print("🔄 Initializing Account Manager...")
         self.accounts = load_accounts()
-        print(f"📊 Loaded {len(self.accounts)} accounts from storage")
         self.valid_tokens = {}
         self.token_usage = {}
         self.account_passwords = {acc["username"]: acc["password"] for acc in self.accounts}
         
     async def initialize(self):
-        print("🔄 Starting account validation...")
-        active_count = await self.validate_all_tokens()
-        print(f"✅ Account initialization complete: {active_count} active accounts")
-        return active_count
+        await self.validate_all_tokens()
+        logger.info(f"Initialized AccountManager with valid tokens: {self.valid_tokens}")
         
     async def login_all_accounts(self):
-        print("🔄 Logging in all accounts...")
         tasks = [self.login_single_account(account) for account in self.accounts]
-        results = await asyncio.gather(*tasks)
-        successful_logins = sum(1 for result in results if result)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        successful_logins = sum(1 for result in results if result is True)
         save_accounts(self.accounts)
         self.valid_tokens = {}
         self.token_usage = {}
@@ -325,7 +307,7 @@ class AccountManager:
             if account.get("token"):
                 self.valid_tokens[account["username"]] = account["token"]
                 self.token_usage[account["username"]] = 0
-        print(f"✅ Login completed: {successful_logins} successful, {len(self.accounts) - successful_logins} failed")
+        logger.info(f"Login all accounts: {successful_logins} successful, valid tokens: {self.valid_tokens}")
         return successful_logins
     
     async def login_single_account(self, account):
@@ -333,7 +315,9 @@ class AccountManager:
         if token:
             account["token"] = token
             account["last_login"] = datetime.now().isoformat()
+            logger.info(f"Successful login for {account['username']}")
             return True
+        logger.error(f"Failed login for {account['username']}")
         return False
     
     async def logout_all_accounts(self):
@@ -344,20 +328,20 @@ class AccountManager:
         self.valid_tokens = {}
         self.token_usage = {}
         save_accounts(self.accounts)
-        print("✅ All accounts logged out")
+        logger.info("All accounts logged out")
         return True
     
     async def validate_all_tokens(self):
+        self.accounts = load_accounts()  # Reload accounts to avoid race condition
         async def no_token_task():
             return False, None
         tasks = [self.validate_single_token(account) if account.get("token") else no_token_task() for account in self.accounts]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         self.valid_tokens = {}
         self.token_usage = {}
-        valid_count = 0
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                print(f"❌ Exception in token validation for account {self.accounts[i]['username']}: {result}")
+                logger.error(f"❌ Exception in token validation for account {self.accounts[i]['username']}: {result}")
                 continue
             is_valid, token = result
             if is_valid and token:
@@ -365,51 +349,56 @@ class AccountManager:
                 self.valid_tokens[username] = token
                 self.token_usage[username] = 0
                 self.accounts[i]["token"] = token
-                valid_count += 1
         save_accounts(self.accounts)
-        print(f"✅ Token validation: {valid_count} valid tokens")
-        return valid_count
+        logger.info(f"Validated tokens: {self.valid_tokens}")
+        return len(self.valid_tokens)
     
     async def validate_single_token(self, account):
+        username = account["username"]
         if not account.get("token"):
-            new_token = await login_api_async(account["username"], account["password"])
+            new_token = await login_api_async(username, account["password"])
             if new_token:
+                logger.info(f"New token generated for {username}")
                 account["token"] = new_token
                 return True, new_token
+            logger.error(f"No token for {username}, login failed")
             return False, None
         try:
             async with aiohttp.ClientSession() as session:
                 status_code, _, _ = await get_status_async(session, account["token"], "0000000000")
                 if status_code is not None and status_code != -1:
+                    logger.info(f"Token valid for {username}")
                     return True, account["token"]
-            new_token = await login_api_async(account["username"], account["password"])
+            new_token = await login_api_async(username, account["password"])
             if new_token:
+                logger.info(f"Refreshed token for {username}")
                 account["token"] = new_token
                 return True, new_token
+            logger.error(f"Token validation failed for {username}, login retry failed")
             return False, None
         except Exception as e:
-            print(f"❌ Token validation error for {account['username']}: {e}")
+            logger.error(f"❌ Token validation error for {username}: {e}")
             return False, None
     
     def get_next_available_token(self):
         if not self.valid_tokens:
-            print("❌ No valid tokens available")
+            logger.error("No valid tokens available")
             return None
         available_accounts = [(username, token, self.token_usage.get(username, 0)) 
                             for username, token in self.valid_tokens.items() 
                             if self.token_usage.get(username, 0) < MAX_PER_ACCOUNT]
         if not available_accounts:
-            print("❌ All accounts are at maximum usage")
+            logger.error("All accounts are at max usage")
             return None
         best_username, best_token, _ = min(available_accounts, key=lambda x: x[2])
         self.token_usage[best_username] += 1
-        print(f"✅ Using token from {best_username}, usage: {self.token_usage[best_username]}/{MAX_PER_ACCOUNT}")
+        logger.info(f"Assigned token for {best_username}, usage: {self.token_usage[best_username]}")
         return best_token, best_username
     
     def release_token(self, username):
         if username in self.token_usage:
             self.token_usage[username] = max(0, self.token_usage[username] - 1)
-            print(f"✅ Released token from {username}, usage: {self.token_usage[username]}/{MAX_PER_ACCOUNT}")
+            logger.info(f"Released token for {username}, new usage: {self.token_usage[username]}")
     
     def get_active_count(self):
         return len(self.valid_tokens)
@@ -417,9 +406,7 @@ class AccountManager:
     def get_remaining_checks(self):
         total_slots = len(self.valid_tokens) * MAX_PER_ACCOUNT
         used_slots = sum(self.token_usage.values())
-        remaining = max(0, total_slots - used_slots)
-        print(f"📊 Remaining checks: {remaining} (Active: {len(self.valid_tokens)}, Used: {used_slots})")
-        return remaining
+        return max(0, total_slots - used_slots)
     
     def get_accounts_status(self):
         return {
@@ -464,7 +451,7 @@ async def track_status_optimized(context: CallbackContext):
                 )
             except BadRequest as e:
                 if "Message is not modified" not in str(e):
-                    print(f"❌ Message update failed for {phone}: {e}")
+                    logger.error(f"❌ Message update failed for {phone}: {e}")
             return
         
         if status_name != last_status:
@@ -478,7 +465,7 @@ async def track_status_optimized(context: CallbackContext):
                 )
             except BadRequest as e:
                 if "Message is not modified" not in str(e):
-                    print(f"❌ Message update failed for {phone}: {e}")
+                    logger.error(f"❌ Message update failed for {phone}: {e}")
         
         final_states = [0, 1, 4, 7, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         if status_code in final_states:
@@ -494,7 +481,7 @@ async def track_status_optimized(context: CallbackContext):
                 )
             except BadRequest as e:
                 if "Message is not modified" not in str(e):
-                    print(f"❌ Final message update failed for {phone}: {e}")
+                    logger.error(f"❌ Final message update failed for {phone}: {e}")
             return
         
         if checks >= 6:
@@ -510,7 +497,7 @@ async def track_status_optimized(context: CallbackContext):
                 )
             except BadRequest as e:
                 if "Message is not modified" not in str(e):
-                    print(f"❌ Timeout message update failed for {phone}: {e}")
+                    logger.error(f"❌ Timeout message update failed for {phone}: {e}")
             return
         
         if context.job_queue:
@@ -524,9 +511,9 @@ async def track_status_optimized(context: CallbackContext):
                 }
             )
         else:
-            print("❌ JobQueue not available, cannot schedule status check")
+            logger.error("❌ JobQueue not available, cannot schedule status check")
     except Exception as e:
-        print(f"❌ Tracking error for {phone}: {e}")
+        logger.error(f"❌ Tracking error for {phone}: {e}")
         account_manager.release_token(username)
 
 # Bulk delete
@@ -547,7 +534,6 @@ async def delete_number_from_all_accounts_optimized(phone):
         stats["total_deleted"] += deleted_count
         stats["today_deleted"] += deleted_count
         save_stats(stats)
-        print(f"✅ Deleted {phone} from {deleted_count} accounts")
         return deleted_count
 
 async def delete_if_exists(session, token, phone, username):
@@ -557,7 +543,7 @@ async def delete_if_exists(session, token, phone, username):
             return await delete_single_number_async(session, token, record_id, username)
         return True
     except Exception as e:
-        print(f"❌ Delete check error for {phone} in {username}: {e}")
+        logger.error(f"❌ Delete check error for {phone} in {username}: {e}")
         return False
 
 # Daily stats reset
@@ -567,7 +553,7 @@ async def reset_daily_stats(context: CallbackContext):
     stats["today_deleted"] = 0
     stats["last_reset"] = datetime.now().isoformat()
     save_stats(stats)
-    print("✅ Daily stats reset")
+    logger.info("Daily stats reset")
 
 # Bot command handlers
 async def start(update: Update, context: CallbackContext) -> None:
@@ -889,7 +875,7 @@ async def async_add_number_optimized(token, phone, msg, username):
                 await msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
                 account_manager.release_token(username)
     except Exception as e:
-        print(f"❌ Add error for {phone}: {e}")
+        logger.error(f"❌ Add error for {phone}: {e}")
         await msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
         account_manager.release_token(username)
 
@@ -965,7 +951,7 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
                 }
             )
         else:
-            print("❌ JobQueue not available, cannot schedule number check")
+            logger.error("❌ JobQueue not available, cannot schedule number check")
         return
     if text == "➕ অ্যাকাউন্ট যোগ":
         await add_account(update, context)
@@ -981,37 +967,24 @@ async def keep_alive():
     while True:
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get("https://webck.onrender.com/ping") as response:
-                    print(f"{datetime.now().isoformat()}: Pinged - Status {response.status}")
+                async with session.get(f"{RENDER_URL}/ping") as response:
+                    logger.info(f"{datetime.now().isoformat()}: Pinged - Status {response.status}")
         except Exception as e:
-            print(f"{datetime.now().isoformat()}: Ping error: {e}")
-        await asyncio.sleep(14 * 60)  # 14 minutes
+            logger.error(f"{datetime.now().isoformat()}: Ping error: {e}")
+        await asyncio.sleep(14 * 60)
 
 # Run FastAPI server
 def run_fastapi():
     uvicorn.run(app, host="0.0.0.0", port=10000)
 
 def main():
-    # Start FastAPI server in a separate thread
-    fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
-    fastapi_thread.start()
-    print("🌐 FastAPI server started on port 10000")
-    
-    # Initialize bot
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-    
     async def initialize_bot():
         await account_manager.initialize()
-        asyncio.create_task(keep_alive())  # Start keep-alive
-        print("🤖 Bot initialized successfully!")
-    
+        asyncio.create_task(keep_alive())
     loop.run_until_complete(initialize_bot())
-    
-    # Create application
     application = Application.builder().token(BOT_TOKEN).build()
-    
-    # Add all handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("logout", logout_account))
     application.add_handler(CommandHandler("admin_users", admin_users))
@@ -1019,14 +992,12 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message_optimized))
     application.add_handler(CallbackQueryHandler(handle_approval, pattern=r"^(allow|deny)_"))
     application.add_handler(CallbackQueryHandler(handle_user_management, pattern=r"^(user|toggle)_"))
-    
     if application.job_queue:
         application.job_queue.run_repeating(reset_daily_stats, interval=86400, first=0)
     else:
-        print("❌ JobQueue not available, daily stats reset not scheduled")
-    
-    print("🚀 Bot starting polling...")
+        logger.error("❌ JobQueue not available, daily stats reset not scheduled")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
+    threading.Thread(target=run_fastapi, daemon=True).start()
     main()
