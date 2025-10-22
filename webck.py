@@ -583,7 +583,7 @@ async def track_status_optimized(context: CallbackContext):
         if checks >= 6:
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            timeout_text = f"`{phone}` ⏰ Timeout (Last: {status_name})"
+            timeout_text = f"`{phone}` 🟡 Try leter "
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -707,7 +707,7 @@ async def start(update: Update, context: CallbackContext) -> None:
             reply_markup=reply_markup
         )
         await update.message.reply_text(
-            "⏳ Your access request has been sent to admin. Please wait for approval."
+            "⏳ Your access request has been sent to admin. Please wait for approval.\n\n Admin: @Notfound_errorx"
         )
         return
         
@@ -723,7 +723,7 @@ async def start(update: Update, context: CallbackContext) -> None:
     remaining = account_manager.get_remaining_checks()
     await update.message.reply_text(
         f"🔥 **নম্বর চেকার বট**\n\n"
-        f"📱 **Active accounts:** {active}\n"
+        f"📱 **Active Server:** {active}\n"
         f"✅ **Remaining checks:** {remaining}\n\n"
         f"📱 **নম্বর পাঠান** যেকোনো format এ",
         parse_mode='Markdown'
