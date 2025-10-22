@@ -25,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = "6224828344:AAF8T-lhNZDl3E8dBRzK7p6NJtIr6Dzj0b8"
+BOT_TOKEN = "6224828344:AAHUAHnOSaB5DUGfCtg9QqCWnNkDBRhxQE0"
 BASE_URL = "http://8.222.182.223:8081"
 ACCOUNTS_FILE = "/opt/render/project/src/accounts.json"  # Explicit path for Render
 USERS_FILE = "/opt/render/project/src/users.json"
