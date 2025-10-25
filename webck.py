@@ -281,12 +281,15 @@ async def login_api_async(username, password):
         return None
 
 # Normalize phone - Improved to extract multiple numbers
+# Normalize phone - Improved to extract multiple numbers WITH ORDER PRESERVED
 def extract_phone_numbers(text):
     # Find all sequences of digits that could be phone numbers
     phone_pattern = r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b|\b\d{10}\b'
     matches = re.findall(phone_pattern, text)
     
     normalized_numbers = []
+    seen_numbers = set()  # Track duplicates while preserving order
+    
     for match in matches:
         # Remove all non-digit characters
         digits = re.sub(r'\D', '', match)
@@ -295,12 +298,12 @@ def extract_phone_numbers(text):
         if len(digits) == 11 and digits.startswith('1'):
             digits = digits[1:]
         
-        if len(digits) == 10:
+        if len(digits) == 10 and digits not in seen_numbers:
             normalized_numbers.append(digits)
+            seen_numbers.add(digits)
     
-    return list(set(normalized_numbers))  # Remove duplicates
-
-# Async add number
+    return normalized_numbers  # Return in original order without duplicates
+    
 async def add_number_async(session, token, cc, phone, retry_count=2):
     for attempt in range(retry_count):
         try:
