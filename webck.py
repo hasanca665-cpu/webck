@@ -14,6 +14,8 @@ from telegram.error import BadRequest
 from fastapi import FastAPI
 import uvicorn
 import random
+import psutil
+import time as time_module
 
 # Configure logging to focus on errors only
 logging.basicConfig(
@@ -35,6 +37,9 @@ STATS_FILE = "/tmp/stats.json" if 'RENDER' in os.environ else "stats.json"
 
 ADMIN_ID = 5624278091
 MAX_PER_ACCOUNT = 5
+
+# Bot start time for uptime calculation
+BOT_START_TIME = time_module.time()
 
 # Status map
 status_map = {
@@ -280,18 +285,25 @@ async def login_api_async(username, password):
         print(f"❌ Login error for {username}: {e}")
         return None
 
-# Normalize phone - Improved to extract multiple numbers
+# Normalize phone - Improved to extract multiple numbers with international format support
 def extract_phone_numbers(text):
-    # Find all sequences of digits that could be phone numbers
-    phone_pattern = r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b|\b\d{10}\b'
+    # Enhanced pattern to match various phone number formats including international
+    phone_pattern = r'\+?1?[-.\s]?\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})|\b\d{10}\b'
     matches = re.findall(phone_pattern, text)
     
     normalized_numbers = []
     for match in matches:
-        # Remove all non-digit characters
-        digits = re.sub(r'\D', '', match)
+        if isinstance(match, tuple):
+            # For pattern matches with groups
+            digits = ''.join(match)
+        else:
+            # For simple 10-digit matches
+            digits = match
         
-        # Handle country code if present
+        # Remove all non-digit characters
+        digits = re.sub(r'\D', '', digits)
+        
+        # Handle country code if present (US/Canada)
         if len(digits) == 11 and digits.startswith('1'):
             digits = digits[1:]
         
@@ -300,53 +312,50 @@ def extract_phone_numbers(text):
     
     return list(set(normalized_numbers))  # Remove duplicates
 
-# Async add number
-async def add_number_async(session, token, cc, phone, retry_count=2):
+# Async add number - SUPER FAST VERSION
+async def add_number_async(session, token, cc, phone, retry_count=1):
     for attempt in range(retry_count):
         try:
             headers = {"Admin-Token": token}
             add_url = f"{BASE_URL}/z-number-base/addNum?cc={cc}&phoneNum={phone}&smsStatus=2"
-            async with session.post(add_url, headers=headers, timeout=10) as response:
+            async with session.post(add_url, headers=headers, timeout=5) as response:
                 if response.status == 200:
                     print(f"✅ Number {phone} added successfully")
                     return True
                 elif response.status == 401:
-                    print(f"❌ Token expired during add for {phone}, attempt {attempt + 1}")
-                    continue
+                    print(f"❌ Token expired during add for {phone}")
+                    return False
                 elif response.status in (400, 409):
-                    print(f"❌ Number {phone} already exists or invalid, status {response.status}")
+                    print(f"❌ Number {phone} already exists or invalid")
                     return False
                 else:
                     print(f"❌ Add failed for {phone} with status {response.status}")
+                    return False
         except Exception as e:
-            print(f"❌ Add number error for {phone} (attempt {attempt + 1}): {e}")
+            print(f"❌ Add number error for {phone}: {e}")
+            return False
     return False
 
-# Status checking
+# Status checking - SUPER FAST VERSION
 async def get_status_async(session, token, phone):
     try:
         headers = {"Admin-Token": token}
         status_url = f"{BASE_URL}/z-number-base/getAullNum?page=1&pageSize=15&phoneNum={phone}"
-        async with session.get(status_url, headers=headers, timeout=10) as response:
+        async with session.get(status_url, headers=headers, timeout=5) as response:
             if response.status == 401:
-                print(f"❌ Token expired for {phone}")
                 return -1, "❌ Token Expired", None
             
             try:
                 res = await response.json()
-            except json.JSONDecodeError as e:
-                print(f"❌ JSON decode error for {phone}: {e}")
+            except:
                 return -2, "❌ API Error", None
             
             if res.get('code') == 28004:
-                print(f"❌ Login required for {phone}")
                 return -1, "❌ Token Expired", None
             
             if res.get('msg') and any(keyword in res.get('msg').lower() for keyword in ["already exists", "cannot register", "number exists"]):
-                print(f"❌ Number {phone} already exists or cannot register")
                 return 16, "🚫 Already Exists", None
             if res.get('code') in (400, 409):
-                print(f"❌ Number {phone} already exists, code {res.get('code')}")
                 return 16, "🚫 Already Exists", None
             
             if (res and "data" in res and "records" in res["data"] and 
@@ -359,22 +368,16 @@ async def get_status_async(session, token, phone):
             
             return None, "🔵 Checking...", None
     except Exception as e:
-        print(f"❌ Status error for {phone}: {e}")
         return -2, "❌ Error", None
 
-# Async delete
+# Async delete - SUPER FAST VERSION
 async def delete_single_number_async(session, token, record_id, username):
     try:
         headers = {"Admin-Token": token}
         delete_url = f"{BASE_URL}/z-number-base/deleteNum/{record_id}"
-        async with session.delete(delete_url, headers=headers, timeout=10) as response:
-            if response.status == 200:
-                return True
-            else:
-                print(f"❌ Delete failed for {record_id}: Status {response.status}")
-                return False
+        async with session.delete(delete_url, headers=headers, timeout=5) as response:
+            return response.status == 200
     except Exception as e:
-        print(f"❌ Delete error for {record_id}: {e}")
         return False
 
 # Account Manager
@@ -473,23 +476,19 @@ class AccountManager:
     
     def get_next_available_token(self):
         if not self.valid_tokens:
-            print("❌ No valid tokens available")
             return None
         available_accounts = [(username, token, self.token_usage.get(username, 0)) 
                             for username, token in self.valid_tokens.items() 
                             if self.token_usage.get(username, 0) < MAX_PER_ACCOUNT]
         if not available_accounts:
-            print("❌ All accounts are at maximum usage")
             return None
         best_username, best_token, _ = min(available_accounts, key=lambda x: x[2])
         self.token_usage[best_username] += 1
-        print(f"✅ Using token from {best_username}, usage: {self.token_usage[best_username]}/{MAX_PER_ACCOUNT}")
         return best_token, best_username
     
     def release_token(self, username):
         if username in self.token_usage:
             self.token_usage[username] = max(0, self.token_usage[username] - 1)
-            print(f"✅ Released token from {username}, usage: {self.token_usage[username]}/{MAX_PER_ACCOUNT}")
     
     def get_active_count(self):
         return len(self.valid_tokens)
@@ -498,7 +497,6 @@ class AccountManager:
         total_slots = len(self.valid_tokens) * MAX_PER_ACCOUNT
         used_slots = sum(self.token_usage.values())
         remaining = max(0, total_slots - used_slots)
-        print(f"📊 Remaining checks: {remaining} (Active: {len(self.valid_tokens)}, Used: {used_slots})")
         return remaining
     
     def get_accounts_status(self):
@@ -517,12 +515,11 @@ def is_user_approved(user_id):
     if user_id == ADMIN_ID:
         return True
     users = load_users()
-    # Ensure users is a dictionary before accessing it
     if isinstance(users, dict):
         return users.get(str(user_id), {}).get("approved", False)
     return False
 
-# Track status
+# Track status - SUPER FAST VERSION
 async def track_status_optimized(context: CallbackContext):
     data = context.job.data
     phone = data['phone']
@@ -537,7 +534,7 @@ async def track_status_optimized(context: CallbackContext):
         
         if status_code == -1:
             account_manager.release_token(username)
-            error_text = f"`{phone}` ❌ Token Error (Auto-Retry)"
+            error_text = f"`{phone}` ❌ Token Error"
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -545,9 +542,8 @@ async def track_status_optimized(context: CallbackContext):
                     text=error_text,
                     parse_mode='Markdown'
                 )
-            except BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    print(f"❌ Message update failed for {phone}: {e}")
+            except:
+                pass
             return
         
         if status_name != last_status:
@@ -559,14 +555,13 @@ async def track_status_optimized(context: CallbackContext):
                     text=new_text,
                     parse_mode='Markdown'
                 )
-            except BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    print(f"❌ Message update failed for {phone}: {e}")
+            except:
+                pass
         
         final_states = [0, 1, 4, 7, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         if status_code in final_states:
             account_manager.release_token(username)
-            deleted_count = await delete_number_from_all_accounts_optimized(phone)
+            asyncio.create_task(delete_number_from_all_accounts_optimized(phone))
             final_text = f"`{phone}` {status_name}"
             try:
                 await context.bot.edit_message_text(
@@ -575,15 +570,14 @@ async def track_status_optimized(context: CallbackContext):
                     text=final_text,
                     parse_mode='Markdown'
                 )
-            except BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    print(f"❌ Final message update failed for {phone}: {e}")
+            except:
+                pass
             return
         
-        if checks >= 6:
+        if checks >= 4:  # Reduced from 6 to 4 for faster completion
             account_manager.release_token(username)
-            deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            timeout_text = f"`{phone}` 🟡 Try leter "
+            asyncio.create_task(delete_number_from_all_accounts_optimized(phone))
+            timeout_text = f"`{phone}` 🟡 Try later"
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -591,57 +585,45 @@ async def track_status_optimized(context: CallbackContext):
                     text=timeout_text,
                     parse_mode='Markdown'
                 )
-            except BadRequest as e:
-                if "Message is not modified" not in str(e):
-                    print(f"❌ Timeout message update failed for {phone}: {e}")
+            except:
+                pass
             return
         
         if context.job_queue:
             context.job_queue.run_once(
                 track_status_optimized, 
-                1,
+                1,  # Reduced from 2 to 1 second
                 data={
                     **data, 
                     'checks': checks + 1, 
                     'last_status': status_name
                 }
             )
-        else:
-            print("❌ JobQueue not available, cannot schedule status check")
     except Exception as e:
-        print(f"❌ Tracking error for {phone}: {e}")
         account_manager.release_token(username)
 
-# Bulk delete
+# Bulk delete - SUPER FAST VERSION
 async def delete_number_from_all_accounts_optimized(phone):
     accounts = load_accounts()
-    deleted_count = 0
     async with aiohttp.ClientSession() as session:
         tasks = []
         for account in accounts:
             if account.get("token"):
                 tasks.append(delete_if_exists(session, account["token"], phone, account['username']))
         if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for i, result in enumerate(results):
-                if result is True:
-                    deleted_count += 1
+            await asyncio.gather(*tasks, return_exceptions=True)
         stats = load_stats()
-        stats["total_deleted"] += deleted_count
-        stats["today_deleted"] += deleted_count
+        stats["total_deleted"] += 1
+        stats["today_deleted"] += 1
         save_stats(stats)
-        print(f"✅ Deleted {phone} from {deleted_count} accounts")
-        return deleted_count
 
 async def delete_if_exists(session, token, phone, username):
     try:
         status_code, _, record_id = await get_status_async(session, token, phone)
         if record_id:
-            return await delete_single_number_async(session, token, record_id, username)
-        return True
-    except Exception as e:
-        print(f"❌ Delete check error for {phone} in {username}: {e}")
-        return False
+            await delete_single_number_async(session, token, record_id, username)
+    except:
+        pass
 
 # Daily stats reset
 async def reset_daily_stats(context: CallbackContext):
@@ -650,16 +632,40 @@ async def reset_daily_stats(context: CallbackContext):
     stats["today_deleted"] = 0
     stats["last_reset"] = datetime.now().isoformat()
     save_stats(stats)
-    print("✅ Daily stats reset")
+
+# Get bot uptime
+def get_bot_uptime():
+    uptime_seconds = int(time_module.time() - BOT_START_TIME)
+    days = uptime_seconds // 86400
+    hours = (uptime_seconds % 86400) // 3600
+    minutes = (uptime_seconds % 3600) // 60
+    seconds = uptime_seconds % 60
+    
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m {seconds}s"
+    elif hours > 0:
+        return f"{hours}h {minutes}m {seconds}s"
+    elif minutes > 0:
+        return f"{minutes}m {seconds}s"
+    else:
+        return f"{seconds}s"
+
+# Get memory usage
+def get_memory_usage():
+    try:
+        process = psutil.Process()
+        memory_info = process.memory_info()
+        memory_mb = memory_info.rss / 1024 / 1024
+        return f"{memory_mb:.2f} MB"
+    except:
+        return "N/A"
 
 # Bot command handlers
 async def start(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
     users = load_users()
     
-    # Ensure users is a dictionary
     if not isinstance(users, dict):
-        print("⚠️ Users data is not a dictionary, initializing empty dict")
         users = {}
     
     if user_id == ADMIN_ID:
@@ -733,19 +739,39 @@ async def show_stats(update: Update, context: CallbackContext) -> None:
     if not is_user_approved(update.effective_user.id):
         await update.message.reply_text("❌ You are not approved to use this bot!")
         return
+    
     stats = load_stats()
     accounts_status = account_manager.get_accounts_status()
+    users = load_users()
+    
+    # Count user statistics
+    total_users = len(users)
+    approved_users = sum(1 for user_data in users.values() if user_data.get("approved", False))
+    pending_users = sum(1 for user_data in users.values() if user_data.get("pending", False) and not user_data.get("approved", False))
+    
+    # Get system information
+    uptime = get_bot_uptime()
+    memory_usage = get_memory_usage()
+    
     await update.message.reply_text(
         f"📊 **Statistics Dashboard**\n\n"
-        f"🔢 **Total Checked:** {stats['total_checked']}\n"
-        f"🗑️ **Total Deleted:** {stats['total_deleted']}\n"
-        f"📅 **Today Checked:** {stats['today_checked']}\n"
-        f"🗑️ **Today Deleted:** {stats['today_deleted']}\n\n"
+        f"👥 **User Statistics:**\n"
+        f"• Total Users: {total_users}\n"
+        f"• Approved Users: {approved_users}\n"
+        f"• Pending Users: {pending_users}\n\n"
+        f"🔢 **Number Statistics:**\n"
+        f"• Total Checked: {stats['total_checked']}\n"
+        f"• Total Deleted: {stats['total_deleted']}\n"
+        f"• Today Checked: {stats['today_checked']}\n"
+        f"• Today Deleted: {stats['today_deleted']}\n\n"
         f"📱 **Account Status:**\n"
         f"• Total: {accounts_status['total']}\n"
         f"• Active: {accounts_status['active']}\n"
         f"• Inactive: {accounts_status['inactive']}\n"
-        f"• Current Usage: {sum(accounts_status['usage'].values())}/{accounts_status['active'] * MAX_PER_ACCOUNT}",
+        f"• Current Usage: {sum(accounts_status['usage'].values())}/{accounts_status['active'] * MAX_PER_ACCOUNT}\n\n"
+        f"⚙️ **System Information:**\n"
+        f"• Bot Uptime: {uptime}\n"
+        f"• Memory Usage: {memory_usage}",
         parse_mode='Markdown'
     )
 
@@ -759,7 +785,6 @@ async def handle_approval(update: Update, context: CallbackContext) -> None:
     user_id = int(data.split('_')[1])
     users = load_users()
     
-    # Ensure users is a dictionary
     if not isinstance(users, dict):
         users = {}
         
@@ -792,7 +817,6 @@ async def admin_users(update: Update, context: CallbackContext) -> None:
         return
     users = load_users()
     
-    # Ensure users is a dictionary
     if not isinstance(users, dict):
         users = {}
         
@@ -833,7 +857,6 @@ async def handle_user_management(update: Update, context: CallbackContext) -> No
         user_id = data.split('_')[1]
         users = load_users()
         
-        # Ensure users is a dictionary
         if not isinstance(users, dict):
             users = {}
             
@@ -850,7 +873,6 @@ async def handle_user_management(update: Update, context: CallbackContext) -> No
         user_id = data.split('_')[1]
         users = load_users()
         
-        # Ensure users is a dictionary
         if not isinstance(users, dict):
             users = {}
             
@@ -973,7 +995,7 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         parse_mode='Markdown'
     )
 
-# Async number adding
+# Async number adding - SUPER FAST VERSION
 async def async_add_number_optimized(token, phone, msg, username):
     try:
         async with aiohttp.ClientSession() as session:
@@ -989,30 +1011,28 @@ async def async_add_number_optimized(token, phone, msg, username):
                 await msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
                 account_manager.release_token(username)
     except Exception as e:
-        print(f"❌ Add error for {phone}: {e}")
         await msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
         account_manager.release_token(username)
 
-# Process multiple numbers from a single message
+# Process multiple numbers from a single message - SUPER FAST PARALLEL PROCESSING
 async def process_multiple_numbers(update: Update, context: CallbackContext, text: str):
-    """Process multiple phone numbers from a single message"""
+    """Process multiple phone numbers from a single message - FAST PARALLEL"""
     numbers = extract_phone_numbers(text)
     
     if not numbers:
         await update.message.reply_text("❌ কোনো ভ্যালিড নম্বর পাওয়া যায়নি!")
         return
     
-    # Start processing immediately without any notification message
-    for phone in numbers:
-        if account_manager.get_remaining_checks() <= 0:
-            # Only notify if all accounts are full
-            await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
-            break
-            
+    # Send initial processing message
+    processing_msg = await update.message.reply_text(f"⚡ Processing {len(numbers)} numbers in parallel...")
+    
+    # Process all numbers in parallel but maintain order in display
+    tasks = []
+    available_slots = account_manager.get_remaining_checks()
+    
+    for index, phone in enumerate(numbers[:available_slots]):  # Only process available slots
         token_data = account_manager.get_next_available_token()
         if not token_data:
-            # Only notify if no accounts available
-            await update.message.reply_text("❌ No available accounts! Please login first.")
             break
             
         token, username = token_data
@@ -1022,12 +1042,15 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
         save_stats(stats)
         
         msg = await update.message.reply_text(f"`{phone}` 🔵 Processing...", parse_mode='Markdown')
-        asyncio.create_task(async_add_number_optimized(token, phone, msg, username))
         
+        # Start the add process
+        task = asyncio.create_task(async_add_number_optimized(token, phone, msg, username))
+        
+        # Start tracking
         if context.job_queue:
             context.job_queue.run_once(
                 track_status_optimized, 
-                2,
+                1,  # Faster tracking
                 data={
                     'chat_id': update.message.chat_id,
                     'message_id': msg.message_id,
@@ -1038,8 +1061,16 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
                     'last_status': '🔵 Processing...'
                 }
             )
+        
+        tasks.append(task)
+    
+    # Wait for all add operations to complete
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    
+    await processing_msg.edit_text(f"✅ Started parallel processing of {len(tasks)} numbers!")
 
-# Main message handler
+# Main message handler - OPTIMIZED
 async def handle_message_optimized(update: Update, context: CallbackContext) -> None:
     if not is_user_approved(update.effective_user.id):
         await update.message.reply_text("❌ You are not approved to use this bot!")
@@ -1121,7 +1152,7 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
             if context.job_queue:
                 context.job_queue.run_once(
                     track_status_optimized, 
-                    2,
+                    1,  # Faster tracking
                     data={
                         'chat_id': update.message.chat_id,
                         'message_id': msg.message_id,
@@ -1133,7 +1164,7 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
                     }
                 )
         else:
-            # Multiple numbers processing
+            # Multiple numbers processing - PARALLEL (FAST)
             await process_multiple_numbers(update, context, text)
         return
     
