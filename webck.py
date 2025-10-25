@@ -1002,36 +1002,26 @@ async def async_add_number_optimized(token, phone, msg, username, serial_number=
         account_manager.release_token(username)
 
 # Process multiple numbers from a single message with serial numbers
+# Process multiple numbers from a single message
 async def process_multiple_numbers(update: Update, context: CallbackContext, text: str):
-    """Process multiple phone numbers from a single message with serial numbers"""
+    """Process multiple phone numbers from a single message"""
     numbers = extract_phone_numbers(text)
     
     if not numbers:
         await update.message.reply_text("❌ কোনো ভ্যালিড নম্বর পাওয়া যায়নি!")
         return
     
-    # Send initial processing message with serial numbers
-    processing_text = "🔢 **Processing Numbers:**\n\n"
-    for i, phone in enumerate(numbers, 1):
-        processing_text += f"{i}. `{phone}`\n"
-    
-    processing_msg = await update.message.reply_text(processing_text, parse_mode='Markdown')
-    
-    # Process each number with serial tracking
+    # Start processing immediately without any notification message - JUST LIKE BEFORE
     for index, phone in enumerate(numbers, 1):
         if account_manager.get_remaining_checks() <= 0:
-            await processing_msg.edit_text(
-                f"{processing_text}\n❌ **Stopped:** All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}",
-                parse_mode='Markdown'
-            )
+            # Only notify if all accounts are full
+            await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
             break
             
         token_data = account_manager.get_next_available_token()
         if not token_data:
-            await processing_msg.edit_text(
-                f"{processing_text}\n❌ **Stopped:** No available accounts! Please login first.",
-                parse_mode='Markdown'
-            )
+            # Only notify if no accounts available
+            await update.message.reply_text("❌ No available accounts! Please login first.")
             break
             
         token, username = token_data
@@ -1040,10 +1030,9 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
         stats["today_checked"] += 1
         save_stats(stats)
         
-        # Create individual message for each number with serial number
-        individual_msg = await update.message.reply_text(f"{index}. `{phone}` 🔵 Processing...", parse_mode='Markdown')
-        
-        asyncio.create_task(async_add_number_optimized(token, phone, individual_msg, username, index))
+        # Only change: add serial number to the message
+        msg = await update.message.reply_text(f"{index}. `{phone}` 🔵 Processing...", parse_mode='Markdown')
+        asyncio.create_task(async_add_number_optimized(token, phone, msg, username, index))
         
         if context.job_queue:
             context.job_queue.run_once(
@@ -1051,7 +1040,7 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
                 2,
                 data={
                     'chat_id': update.message.chat_id,
-                    'message_id': individual_msg.message_id,
+                    'message_id': msg.message_id,
                     'phone': phone,
                     'token': token,
                     'username': username,
@@ -1060,8 +1049,7 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
                     'serial_number': index
                 }
             )
-
-# Main message handler
+            
 async def handle_message_optimized(update: Update, context: CallbackContext) -> None:
     if not is_user_approved(update.effective_user.id):
         await update.message.reply_text("❌ You are not approved to use this bot!")
