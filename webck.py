@@ -14,8 +14,6 @@ from telegram.error import BadRequest
 from fastapi import FastAPI
 import uvicorn
 import random
-import psutil
-import time as time_module
 
 # Configure logging to focus on errors only
 logging.basicConfig(
@@ -37,9 +35,6 @@ STATS_FILE = "/tmp/stats.json" if 'RENDER' in os.environ else "stats.json"
 
 ADMIN_ID = 5624278091
 MAX_PER_ACCOUNT = 5
-
-# Bot start time for uptime calculation
-BOT_START_TIME = time_module.time()
 
 # Status map
 status_map = {
@@ -285,25 +280,18 @@ async def login_api_async(username, password):
         print(f"❌ Login error for {username}: {e}")
         return None
 
-# Normalize phone - Improved to extract multiple numbers with international format support
+# Normalize phone - Improved to extract multiple numbers
 def extract_phone_numbers(text):
-    # Enhanced pattern to match various phone number formats including international
-    phone_pattern = r'\+?1?[-.\s]?\(?(\d{3})\)?[-.\s]?(\d{3})[-.\s]?(\d{4})|\b\d{10}\b'
+    # Find all sequences of digits that could be phone numbers
+    phone_pattern = r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b|\b\d{10}\b'
     matches = re.findall(phone_pattern, text)
     
     normalized_numbers = []
     for match in matches:
-        if isinstance(match, tuple):
-            # For pattern matches with groups
-            digits = ''.join(match)
-        else:
-            # For simple 10-digit matches
-            digits = match
-        
         # Remove all non-digit characters
-        digits = re.sub(r'\D', '', digits)
+        digits = re.sub(r'\D', '', match)
         
-        # Handle country code if present (US/Canada)
+        # Handle country code if present
         if len(digits) == 11 and digits.startswith('1'):
             digits = digits[1:]
         
@@ -542,14 +530,17 @@ async def track_status_optimized(context: CallbackContext):
     username = data['username']
     checks = data['checks']
     last_status = data.get('last_status', '🔵 Processing...')
+    serial_number = data.get('serial_number')
     
     try:
         async with aiohttp.ClientSession() as session:
             status_code, status_name, record_id = await get_status_async(session, token, phone)
         
+        prefix = f"{serial_number}. " if serial_number else ""
+        
         if status_code == -1:
             account_manager.release_token(username)
-            error_text = f"`{phone}` ❌ Token Error (Auto-Retry)"
+            error_text = f"{prefix}`{phone}` ❌ Token Error (Auto-Retry)"
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -563,7 +554,7 @@ async def track_status_optimized(context: CallbackContext):
             return
         
         if status_name != last_status:
-            new_text = f"`{phone}` {status_name}"
+            new_text = f"{prefix}`{phone}` {status_name}"
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -579,7 +570,7 @@ async def track_status_optimized(context: CallbackContext):
         if status_code in final_states:
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            final_text = f"`{phone}` {status_name}"
+            final_text = f"{prefix}`{phone}` {status_name}"
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -595,7 +586,7 @@ async def track_status_optimized(context: CallbackContext):
         if checks >= 6:
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            timeout_text = f"`{phone}` 🟡 Try leter "
+            timeout_text = f"{prefix}`{phone}` 🟡 Try leter "
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -663,30 +654,6 @@ async def reset_daily_stats(context: CallbackContext):
     stats["last_reset"] = datetime.now().isoformat()
     save_stats(stats)
     print("✅ Daily stats reset")
-
-# Get bot uptime
-def get_bot_uptime():
-    uptime_seconds = int(time_module.time() - BOT_START_TIME)
-    days = uptime_seconds // 86400
-    hours = (uptime_seconds % 86400) // 3600
-    minutes = (uptime_seconds % 3600) // 60
-    seconds = uptime_seconds % 60
-    
-    if days > 0:
-        return f"{days}d {hours}h {minutes}m {seconds}s"
-    elif hours > 0:
-        return f"{hours}h {minutes}m {seconds}s"
-    elif minutes > 0:
-        return f"{minutes}m {seconds}s"
-    else:
-        return f"{seconds}s"
-
-# Get memory usage
-def get_memory_usage():
-    process = psutil.Process()
-    memory_info = process.memory_info()
-    memory_mb = memory_info.rss / 1024 / 1024
-    return f"{memory_mb:.2f} MB"
 
 # Bot command handlers
 async def start(update: Update, context: CallbackContext) -> None:
@@ -769,39 +736,19 @@ async def show_stats(update: Update, context: CallbackContext) -> None:
     if not is_user_approved(update.effective_user.id):
         await update.message.reply_text("❌ You are not approved to use this bot!")
         return
-    
     stats = load_stats()
     accounts_status = account_manager.get_accounts_status()
-    users = load_users()
-    
-    # Count user statistics
-    total_users = len(users)
-    approved_users = sum(1 for user_data in users.values() if user_data.get("approved", False))
-    pending_users = sum(1 for user_data in users.values() if user_data.get("pending", False) and not user_data.get("approved", False))
-    
-    # Get system information
-    uptime = get_bot_uptime()
-    memory_usage = get_memory_usage()
-    
     await update.message.reply_text(
         f"📊 **Statistics Dashboard**\n\n"
-        f"👥 **User Statistics:**\n"
-        f"• Total Users: {total_users}\n"
-        f"• Approved Users: {approved_users}\n"
-        f"• Pending Users: {pending_users}\n\n"
-        f"🔢 **Number Statistics:**\n"
-        f"• Total Checked: {stats['total_checked']}\n"
-        f"• Total Deleted: {stats['total_deleted']}\n"
-        f"• Today Checked: {stats['today_checked']}\n"
-        f"• Today Deleted: {stats['today_deleted']}\n\n"
+        f"🔢 **Total Checked:** {stats['total_checked']}\n"
+        f"🗑️ **Total Deleted:** {stats['total_deleted']}\n"
+        f"📅 **Today Checked:** {stats['today_checked']}\n"
+        f"🗑️ **Today Deleted:** {stats['today_deleted']}\n\n"
         f"📱 **Account Status:**\n"
         f"• Total: {accounts_status['total']}\n"
         f"• Active: {accounts_status['active']}\n"
         f"• Inactive: {accounts_status['inactive']}\n"
-        f"• Current Usage: {sum(accounts_status['usage'].values())}/{accounts_status['active'] * MAX_PER_ACCOUNT}\n\n"
-        f"⚙️ **System Information:**\n"
-        f"• Bot Uptime: {uptime}\n"
-        f"• Memory Usage: {memory_usage}",
+        f"• Current Usage: {sum(accounts_status['usage'].values())}/{accounts_status['active'] * MAX_PER_ACCOUNT}",
         parse_mode='Markdown'
     )
 
@@ -1029,47 +976,59 @@ async def help_command(update: Update, context: CallbackContext) -> None:
         parse_mode='Markdown'
     )
 
-# Async number adding
-async def async_add_number_optimized(token, phone, msg, username):
+# Async number adding with serial number
+async def async_add_number_optimized(token, phone, msg, username, serial_number=None):
     try:
         async with aiohttp.ClientSession() as session:
             added = await add_number_async(session, token, 11, phone)
+            prefix = f"{serial_number}. " if serial_number else ""
             if added:
-                await msg.edit_text(f"`{phone}` 🔵 In Progress", parse_mode='Markdown')
+                await msg.edit_text(f"{prefix}`{phone}` 🔵 In Progress", parse_mode='Markdown')
             else:
                 status_code, status_name, record_id = await get_status_async(session, token, phone)
                 if status_code == 16:
-                    await msg.edit_text(f"`{phone}` 🚫 Already Exists", parse_mode='Markdown')
+                    await msg.edit_text(f"{prefix}`{phone}` 🚫 Already Exists", parse_mode='Markdown')
                     account_manager.release_token(username)
                     return
-                await msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
+                await msg.edit_text(f"{prefix}`{phone}` ❌ Add Failed", parse_mode='Markdown')
                 account_manager.release_token(username)
     except Exception as e:
         print(f"❌ Add error for {phone}: {e}")
-        await msg.edit_text(f"`{phone}` ❌ Add Failed", parse_mode='Markdown')
+        prefix = f"{serial_number}. " if serial_number else ""
+        await msg.edit_text(f"{prefix}`{phone}` ❌ Add Failed", parse_mode='Markdown')
         account_manager.release_token(username)
 
-# Process multiple numbers from a single message IN SEQUENTIAL ORDER
+# Process multiple numbers from a single message with serial numbers
 async def process_multiple_numbers(update: Update, context: CallbackContext, text: str):
-    """Process multiple phone numbers from a single message IN SEQUENTIAL ORDER"""
+    """Process multiple phone numbers from a single message with serial numbers"""
     numbers = extract_phone_numbers(text)
     
     if not numbers:
         await update.message.reply_text("❌ কোনো ভ্যালিড নম্বর পাওয়া যায়নি!")
         return
     
-    # Send initial processing message
-    processing_msg = await update.message.reply_text(f"🔄 Processing {len(numbers)} numbers sequentially...")
+    # Send initial processing message with serial numbers
+    processing_text = "🔢 **Processing Numbers:**\n\n"
+    for i, phone in enumerate(numbers, 1):
+        processing_text += f"{i}. `{phone}`\n"
     
-    # Process numbers one by one in sequence
+    processing_msg = await update.message.reply_text(processing_text, parse_mode='Markdown')
+    
+    # Process each number with serial tracking
     for index, phone in enumerate(numbers, 1):
         if account_manager.get_remaining_checks() <= 0:
-            await processing_msg.edit_text(f"❌ All accounts full after processing {index-1} numbers! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
+            await processing_msg.edit_text(
+                f"{processing_text}\n❌ **Stopped:** All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}",
+                parse_mode='Markdown'
+            )
             break
             
         token_data = account_manager.get_next_available_token()
         if not token_data:
-            await processing_msg.edit_text(f"❌ No available accounts after processing {index-1} numbers! Please login first.")
+            await processing_msg.edit_text(
+                f"{processing_text}\n❌ **Stopped:** No available accounts! Please login first.",
+                parse_mode='Markdown'
+            )
             break
             
         token, username = token_data
@@ -1078,11 +1037,10 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
         stats["today_checked"] += 1
         save_stats(stats)
         
-        # Update processing message
-        await processing_msg.edit_text(f"🔄 Processing {index}/{len(numbers)}: `{phone}`")
+        # Create individual message for each number with serial number
+        individual_msg = await update.message.reply_text(f"{index}. `{phone}` 🔵 Processing...", parse_mode='Markdown')
         
-        msg = await update.message.reply_text(f"`{phone}` 🔵 Processing...", parse_mode='Markdown')
-        asyncio.create_task(async_add_number_optimized(token, phone, msg, username))
+        asyncio.create_task(async_add_number_optimized(token, phone, individual_msg, username, index))
         
         if context.job_queue:
             context.job_queue.run_once(
@@ -1090,20 +1048,15 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
                 2,
                 data={
                     'chat_id': update.message.chat_id,
-                    'message_id': msg.message_id,
+                    'message_id': individual_msg.message_id,
                     'phone': phone,
                     'token': token,
                     'username': username,
                     'checks': 0,
-                    'last_status': '🔵 Processing...'
+                    'last_status': '🔵 Processing...',
+                    'serial_number': index
                 }
             )
-        
-        # Small delay between processing numbers to maintain sequence
-        await asyncio.sleep(1)
-    
-    # Final update
-    await processing_msg.edit_text(f"✅ Started sequential processing of {len(numbers)} numbers!")
 
 # Main message handler
 async def handle_message_optimized(update: Update, context: CallbackContext) -> None:
@@ -1199,7 +1152,7 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
                     }
                 )
         else:
-            # Multiple numbers processing - SEQUENTIAL
+            # Multiple numbers processing with serial numbers
             await process_multiple_numbers(update, context, text)
         return
     
