@@ -49,7 +49,7 @@ SUBSCRIPTION_PLANS = {
 
 # Status map
 status_map = {
-    0: "❌ Bad Number",
+    0: "❌ Stop work 10 minutes",
     1: "✅ Registered", 
     2: "🔵 In Progress",
     3: "⚠️ Try Again Later",
@@ -446,7 +446,7 @@ async def get_status_async(session, token, phone):
             return None, "🔵 Checking...", None
     except Exception as e:
         print(f"❌ Status error for {phone}: {e}")
-        return -2, "❌ Error", None
+        return -2, "🔄 Refresh Server", None
 
 # Async delete
 async def delete_single_number_async(session, token, record_id, username):
