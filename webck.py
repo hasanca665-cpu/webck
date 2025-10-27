@@ -25,16 +25,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = "7557246575:AAGuV3u6IFgd9sQbpVtQLtKFXCNsU_FKoJg"
+BOT_TOKEN = "8341377704:AAF8yfGc0jxBn0INh037g-O_YZMKfrtBnSk"
 BASE_URL = "http://8.222.182.223:8081"
 
 # File paths with Render.com compatibility
 ACCOUNTS_FILE = "/tmp/accounts.json" if 'RENDER' in os.environ else "accounts.json"
 USERS_FILE = "/tmp/users.json" if 'RENDER' in os.environ else "users.json" 
 STATS_FILE = "/tmp/stats.json" if 'RENDER' in os.environ else "stats.json"
+SUBSCRIPTIONS_FILE = "/tmp/subscriptions.json" if 'RENDER' in os.environ else "subscriptions.json"
 
 ADMIN_ID = 5624278091
 MAX_PER_ACCOUNT = 5
+
+# Subscription plans
+SUBSCRIPTION_PLANS = {
+    "1": {"days": 1, "price": 30, "label": "1 দিন"},
+    "3": {"days": 3, "price": 90, "label": "3 দিন"}, 
+    "5": {"days": 5, "price": 150, "label": "5 দিন"},
+    "7": {"days": 7, "price": 210, "label": "7 দিন"},
+    "15": {"days": 15, "price": 450, "label": "15 দিন"},
+    "30": {"days": 30, "price": 900, "label": "30 দিন"}
+}
 
 # Status map
 status_map = {
@@ -263,6 +274,79 @@ def save_stats(stats):
     except Exception as e:
         print(f"❌ Error saving stats: {e}")
 
+# Subscription file operations
+def load_subscriptions():
+    try:
+        possible_paths = [SUBSCRIPTIONS_FILE, "subscriptions.json", "/tmp/subscriptions.json", "./subscriptions.json"]
+        for file_path in possible_paths:
+            try:
+                if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        print(f"✅ Loaded subscriptions from {file_path}: {len(data)} users")
+                        return data
+            except Exception as e:
+                print(f"❌ Error loading from {file_path}: {e}")
+                continue
+        return {}
+    except Exception as e:
+        print(f"❌ Error loading subscriptions: {e}")
+        return {}
+
+def save_subscriptions(subscriptions):
+    try:
+        possible_paths = [SUBSCRIPTIONS_FILE, "subscriptions.json", "/tmp/subscriptions.json"]
+        for file_path in possible_paths:
+            try:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(subscriptions, f, indent=4, ensure_ascii=False)
+                break
+            except:
+                continue
+    except Exception as e:
+        print(f"❌ Error saving subscriptions: {e}")
+
+# Subscription functions
+def is_user_subscribed(user_id):
+    if user_id == ADMIN_ID:
+        return True
+    
+    subscriptions = load_subscriptions()
+    user_sub = subscriptions.get(str(user_id), {})
+    
+    if not user_sub:
+        return False
+    
+    end_date = datetime.fromisoformat(user_sub.get('end_date', '2000-01-01'))
+    return datetime.now() < end_date
+
+def get_user_subscription_info(user_id):
+    subscriptions = load_subscriptions()
+    user_sub = subscriptions.get(str(user_id), {})
+    
+    if not user_sub:
+        return None
+    
+    end_date = datetime.fromisoformat(user_sub.get('end_date', '2000-01-01'))
+    plan_days = user_sub.get('plan_days', 0)
+    start_date = datetime.fromisoformat(user_sub.get('start_date', '2000-01-01'))
+    
+    time_remaining = end_date - datetime.now()
+    remaining_days = time_remaining.days
+    remaining_hours = time_remaining.seconds // 3600
+    remaining_minutes = (time_remaining.seconds % 3600) // 60
+    
+    return {
+        'active': datetime.now() < end_date,
+        'end_date': end_date,
+        'plan_days': plan_days,
+        'start_date': start_date,
+        'remaining_days': remaining_days,
+        'remaining_hours': remaining_hours,
+        'remaining_minutes': remaining_minutes,
+        'total_remaining_hours': remaining_days * 24 + remaining_hours
+    }
+
 # Async login
 async def login_api_async(username, password):
     try:
@@ -280,7 +364,6 @@ async def login_api_async(username, password):
         print(f"❌ Login error for {username}: {e}")
         return None
 
-# Normalize phone - Improved to extract multiple numbers
 # Normalize phone - Improved to extract multiple numbers WITH ORDER PRESERVED
 def extract_phone_numbers(text):
     # Find all sequences of digits that could be phone numbers
@@ -515,15 +598,360 @@ class AccountManager:
 # Global account manager
 account_manager = AccountManager()
 
-# User approval
-def is_user_approved(user_id):
-    if user_id == ADMIN_ID:
-        return True
-    users = load_users()
-    # Ensure users is a dictionary before accessing it
-    if isinstance(users, dict):
-        return users.get(str(user_id), {}).get("approved", False)
-    return False
+# Subscription functions
+async def show_subscription_plans(update: Update, context: CallbackContext, message_id=None):
+    keyboard = []
+    row = []
+    
+    for plan_id, plan in SUBSCRIPTION_PLANS.items():
+        button = InlineKeyboardButton(
+            f"{plan['label']} - {plan['price']}৳", 
+            callback_data=f"plan_{plan_id}"
+        )
+        row.append(button)
+        
+        # 2 buttons per row
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    
+    if row:  # Add remaining buttons if any
+        keyboard.append(row)
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    message = "📋 **Select a subscription plan**\n\n"
+    
+    for plan_id, plan in SUBSCRIPTION_PLANS.items():
+        message += f"{plan['label']}\t{plan['price']}৳\n"
+    
+    if message_id:
+        # Edit existing message
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=message_id,
+                text=message,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            print(f"❌ Error editing message: {e}")
+    else:
+        # Send new message
+        if update.message:
+            await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+        else:
+            await update.callback_query.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def show_payment_info(update: Update, context: CallbackContext, plan_id):
+    query = update.callback_query
+    await query.answer()
+    
+    plan = SUBSCRIPTION_PLANS.get(plan_id)
+    
+    if plan:
+        message = (
+            "আপনি নিচের যেকোনো পদ্ধতিতে পেমেন্ট করতে পারেন:\n\n"
+            "💰 Payment:\n"
+            "bKash/nagad: 01861887876\n"
+            f"Amount: {plan['price']}৳ ({plan['label']})\n"
+            f"Reference: {plan_id}day\n"
+            "admin: @Notfound_errorx \n\n"
+            "পেমেন্টের পর স্ক্রিনশট দিয়ে কনফার্ম করুন।"
+        )
+        
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Confirm Payment", callback_data=f"confirm_{plan_id}"),
+                InlineKeyboardButton("🔙 Back to Plans", callback_data="back_to_plans")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await query.edit_message_text(
+            message, 
+            reply_markup=reply_markup,
+            parse_mode='none'
+        )
+
+async def handle_payment_confirmation(update: Update, context: CallbackContext, plan_id):
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    plan = SUBSCRIPTION_PLANS.get(plan_id)
+    
+    if plan:
+        # Send confirmation message to admin
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ Allow Access", callback_data=f"admin_allow_{user_id}_{plan_id}"),
+                InlineKeyboardButton("❌ Deny Access", callback_data=f"admin_deny_{user_id}")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        user_info = f"@{query.from_user.username}" if query.from_user.username else query.from_user.first_name
+        
+        admin_message = (
+            f"🆕 **New Subscription Request**\n\n"
+            f"👤 User: {user_info}\n"
+            f"🆔 ID: `{user_id}`\n"
+            f"📦 Plan: {plan['label']}\n"
+            f"💰 Amount: {plan['price']}৳\n\n"
+            f"Confirm payment and activate subscription?"
+        )
+        
+        try:
+            await context.bot.send_message(
+                ADMIN_ID,
+                admin_message,
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
+            )
+            
+            # Notify user
+            await query.edit_message_text(
+                "✅ **Payment confirmation sent to admin!**\n\n"
+                "Admin will activate your subscription soon.\n"
+                "You will be notified when it's activated.",
+                parse_mode='Markdown'
+            )
+        except Exception as e:
+            print(f"❌ Error sending admin message: {e}")
+            await query.edit_message_text(
+                "❌ Error sending confirmation. Please try again later.",
+                parse_mode='Markdown'
+            )
+
+async def subscription_management(update: Update, context: CallbackContext):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Admin only command!")
+        return
+        
+    subscriptions = load_subscriptions()
+    
+    if not subscriptions:
+        await update.message.reply_text("❌ No active subscriptions!")
+        return
+    
+    message = "📅 **Subscription Management**\n\n"
+    
+    for user_id, sub_data in subscriptions.items():
+        end_date = datetime.fromisoformat(sub_data['end_date'])
+        time_remaining = end_date - datetime.now()
+        remaining_days = time_remaining.days
+        remaining_hours = time_remaining.seconds // 3600
+        remaining_minutes = (time_remaining.seconds % 3600) // 60
+        
+        status = "✅ Active" if remaining_days >= 0 else "❌ Expired"
+        
+        message += f"👤 User ID: `{user_id}`\n"
+        message += f"📅 Plan: {sub_data['plan_days']} days\n"
+        message += f"⏰ End: {end_date.strftime('%Y-%m-%d %H:%M')}\n"
+        message += f"📊 Status: {status}\n"
+        message += f"⏱️ Remaining: {remaining_days}d {remaining_hours}h {remaining_minutes}m\n"
+        message += "───\n"
+    
+    keyboard = [
+        [InlineKeyboardButton("➕ Add Subscription", callback_data="admin_add_sub")],
+        [InlineKeyboardButton("✏️ Edit Subscription", callback_data="admin_edit_sub")],
+        [InlineKeyboardButton("🗑️ Remove Subscription", callback_data="admin_remove_sub")],
+        [InlineKeyboardButton("🔄 Refresh", callback_data="admin_refresh_subs")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(message, reply_markup=reply_markup, parse_mode='Markdown')
+
+async def add_subscription(update: Update, context: CallbackContext):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Admin only command!")
+        return
+        
+    if len(context.args) != 2:
+        await update.message.reply_text("❌ Usage: `/addsub user_id days`", parse_mode='Markdown')
+        return
+        
+    try:
+        user_id = context.args[0]
+        days = int(context.args[1])
+        
+        subscriptions = load_subscriptions()
+        start_date = datetime.now()
+        end_date = start_date + timedelta(days=days)
+        
+        subscriptions[user_id] = {
+            'start_date': start_date.isoformat(),
+            'end_date': end_date.isoformat(),
+            'plan_days': days,
+            'added_by': update.effective_user.id,
+            'added_at': datetime.now().isoformat()
+        }
+        
+        save_subscriptions(subscriptions)
+        
+        await update.message.reply_text(
+            f"✅ Subscription added for user `{user_id}`\n"
+            f"📅 {days} days\n"
+            f"⏰ Valid until: {end_date.strftime('%Y-%m-%d %H:%M')}",
+            parse_mode='Markdown'
+        )
+        
+        # Notify user
+        try:
+            await context.bot.send_message(
+                user_id,
+                f"🎉 **Your subscription has been activated!**\n\n"
+                f"📅 Duration: {days} days\n"
+                f"⏰ Valid until: {end_date.strftime('%Y-%m-%d %H:%M')}\n\n"
+                f"Use /start to access the bot."
+            )
+        except Exception as e:
+            print(f"❌ Could not notify user {user_id}: {e}")
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+async def remove_subscription(update: Update, context: CallbackContext):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Admin only command!")
+        return
+        
+    if not context.args:
+        await update.message.reply_text("❌ Usage: `/removesub user_id`", parse_mode='Markdown')
+        return
+        
+    try:
+        user_id = context.args[0]
+        
+        subscriptions = load_subscriptions()
+        
+        if user_id in subscriptions:
+            del subscriptions[user_id]
+            save_subscriptions(subscriptions)
+            
+            await update.message.reply_text(
+                f"✅ Subscription removed for user `{user_id}`",
+                parse_mode='Markdown'
+            )
+            
+            # Notify user
+            try:
+                await context.bot.send_message(
+                    user_id,
+                    "❌ **Your subscription has been removed!**\n\n"
+                    "You no longer have access to the bot.\n"
+                    "Please purchase a new subscription to continue."
+                )
+            except Exception as e:
+                print(f"❌ Could not notify user {user_id}: {e}")
+        else:
+            await update.message.reply_text(
+                f"❌ No subscription found for user `{user_id}`",
+                parse_mode='Markdown'
+            )
+            
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+async def handle_subscription_callback(update: Update, context: CallbackContext):
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    
+    if data.startswith('plan_'):
+        plan_id = data.split('_')[1]
+        await show_payment_info(update, context, plan_id)
+    
+    elif data.startswith('confirm_'):
+        plan_id = data.split('_')[1]
+        await handle_payment_confirmation(update, context, plan_id)
+    
+    elif data == "back_to_plans":
+        await show_subscription_plans(update, context, query.message.message_id)
+    
+    elif data.startswith('admin_allow_'):
+        # Format: admin_allow_userId_planId
+        parts = data.split('_')
+        user_id = parts[2]
+        plan_id = parts[3]
+        
+        plan = SUBSCRIPTION_PLANS.get(plan_id)
+        
+        if plan:
+            subscriptions = load_subscriptions()
+            start_date = datetime.now()
+            end_date = start_date + timedelta(days=plan['days'])
+            
+            subscriptions[user_id] = {
+                'start_date': start_date.isoformat(),
+                'end_date': end_date.isoformat(),
+                'plan_days': plan['days'],
+                'added_by': query.from_user.id,
+                'added_at': datetime.now().isoformat()
+            }
+            
+            save_subscriptions(subscriptions)
+            
+            # Notify admin
+            await query.edit_message_text(
+                f"✅ Subscription activated for user `{user_id}`\n"
+                f"📅 Plan: {plan['label']}\n"
+                f"⏰ Valid until: {end_date.strftime('%Y-%m-%d %H:%M')}",
+                parse_mode='Markdown'
+            )
+            
+            # Notify user
+            try:
+                await context.bot.send_message(
+                    user_id,
+                    f"🎉 **Your subscription has been activated!**\n\n"
+                    f"📅 Plan: {plan['label']}\n"
+                    f"⏰ Valid until: {end_date.strftime('%Y-%m-%d %H:%M')}\n\n"
+                    f"You can now use the bot. Send /start to begin!"
+                )
+            except Exception as e:
+                print(f"❌ Could not notify user {user_id}: {e}")
+    
+    elif data.startswith('admin_deny_'):
+        user_id = data.split('_')[2]
+        
+        # Notify admin
+        await query.edit_message_text(
+            f"❌ Subscription request denied for user `{user_id}`",
+            parse_mode='Markdown'
+        )
+        
+        # Notify user
+        try:
+            await context.bot.send_message(
+                user_id,
+                "❌ **Your subscription request was denied!**\n\n"
+                "Please contact admin for more information."
+            )
+        except Exception as e:
+            print(f"❌ Could not notify user {user_id}: {e}")
+    
+    elif data == "admin_add_sub":
+        await query.edit_message_text(
+            "👤 User ID এবং দিন সংখ্যা পাঠান এই ফরম্যাটে:\n"
+            "`/addsub user_id days`\n\n"
+            "যেমন: `/addsub 123456789 30`",
+            parse_mode='Markdown'
+        )
+    
+    elif data == "admin_remove_sub":
+        await query.edit_message_text(
+            "👤 User ID পাঠান এই ফরম্যাটে:\n"
+            "`/removesub user_id`\n\n"
+            "যেমন: `/removesub 123456789`",
+            parse_mode='Markdown'
+        )
+    
+    elif data == "admin_refresh_subs":
+        await subscription_management(update, context)
 
 # Track status
 async def track_status_optimized(context: CallbackContext):
@@ -658,22 +1086,54 @@ async def reset_daily_stats(context: CallbackContext):
     save_stats(stats)
     print("✅ Daily stats reset")
 
+# Subscription expiry check
+async def check_subscription_expiry(context: CallbackContext):
+    """Check for expiring subscriptions and send notifications"""
+    subscriptions = load_subscriptions()
+    now = datetime.now()
+    
+    for user_id, sub_data in subscriptions.items():
+        end_date = datetime.fromisoformat(sub_data['end_date'])
+        time_remaining = end_date - now
+        remaining_hours = time_remaining.total_seconds() / 3600
+        
+        # Notify when 1 hour remaining
+        if 0 < remaining_hours <= 1:
+            try:
+                await context.bot.send_message(
+                    int(user_id),
+                    "⚠️ **Subscription Expiring Soon!**\n\n"
+                    "Your subscription will expire in 1 hour.\n"
+                    "Please renew to continue using the bot.\n\n"
+                    "Use /start to view subscription plans."
+                )
+            except Exception as e:
+                print(f"❌ Could not send expiry notification to {user_id}: {e}")
+        
+        # Notify when expired
+        elif remaining_hours <= 0:
+            try:
+                await context.bot.send_message(
+                    int(user_id),
+                    "❌ **Subscription Expired!**\n\n"
+                    "Your subscription has expired.\n"
+                    "Please renew to continue using the bot.\n\n"
+                    "Use /start to view subscription plans."
+                )
+            except Exception as e:
+                print(f"❌ Could not send expired notification to {user_id}: {e}")
+
 # Bot command handlers
 async def start(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
-    users = load_users()
-    
-    # Ensure users is a dictionary
-    if not isinstance(users, dict):
-        print("⚠️ Users data is not a dictionary, initializing empty dict")
-        users = {}
     
     if user_id == ADMIN_ID:
         keyboard = [
             [KeyboardButton("➕ অ্যাকাউন্ট যোগ"), KeyboardButton("📋 অ্যাকাউন্ট লিস্ট")],
-            [KeyboardButton("🚀 ওয়ান-ক্লিক লগইন"), KeyboardButton("🚪 ওয়ান-ক্লিক লগআউট")],
+            [KeyboardButton("🚀 Refresh Server"), KeyboardButton("🚪 ওয়ান-ক্লিক লগআউট")],
             [KeyboardButton("📊 Statistics"), KeyboardButton("👥 User Management")],
-            [KeyboardButton("🔄 রিস্টার্ট বট"), KeyboardButton("❓ সাহায্য")]
+            [KeyboardButton("📅 Subscription Management"), KeyboardButton("🔄 রিস্টার্ট বট")],
+            [KeyboardButton("❓ সাহায্য")]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         accounts_status = account_manager.get_accounts_status()
@@ -690,70 +1150,120 @@ async def start(update: Update, context: CallbackContext) -> None:
         )
         return
         
-    if str(user_id) not in users:
-        users[str(user_id)] = {
-            "username": update.effective_user.username or update.effective_user.first_name,
-            "approved": False,
-            "pending": True
-        }
-        save_users(users)
-        keyboard = [
-            [
-                InlineKeyboardButton("✅ Allow", callback_data=f"allow_{user_id}"),
-                InlineKeyboardButton("❌ Deny", callback_data=f"deny_{user_id}")
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await context.bot.send_message(
-            ADMIN_ID,
-            f"🆕 New user wants to use the bot:\n"
-            f"👤 User: {update.effective_user.first_name}\n"
-            f"📛 Username: @{update.effective_user.username}\n"
-            f"🆔 ID: {user_id}",
-            reply_markup=reply_markup
-        )
-        await update.message.reply_text(
-            "⏳ Your access request has been sent to admin. Please wait for approval.\n\n Admin: @Notfound_errorx"
-        )
+    # Check subscription for regular users
+    if not is_user_subscribed(user_id):
+        await show_subscription_plans(update, context)
         return
         
-    if not users[str(user_id)]["approved"]:
-        await update.message.reply_text(
-            "⏳ Your access is still pending approval. Please wait for admin to approve."
-        )
-        return
-        
-    # Regular users see no keyboard buttons
+    # Regular users with active subscription - তাদেরও কিছু menu options থাকবে
+    keyboard = [
+        [KeyboardButton("🚀 Refresh Server"),
+        KeyboardButton("📊 Statistics")]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
     accounts_status = account_manager.get_accounts_status()
     active = account_manager.get_active_count()
     remaining = account_manager.get_remaining_checks()
+    sub_info = get_user_subscription_info(user_id)
+    
     await update.message.reply_text(
-        f"🔥 **নম্বর চেকার বট**\n\n"
+        f"🔥 WA Number Checker\n\n"
         f"📱 **Active Server:** {active}\n"
-        f"✅ **Remaining checks:** {remaining}\n\n"
+        f"✅ **Remaining checks:** {remaining}\n"
+        f"📅 **Your Subscription:** {sub_info['remaining_days']}d {sub_info['remaining_hours']}h {sub_info['remaining_minutes']}m remaining\n\n"
         f"📱 **নম্বর পাঠান** যেকোনো format এ",
+        reply_markup=reply_markup,
         parse_mode='Markdown'
     )
 
 async def show_stats(update: Update, context: CallbackContext) -> None:
-    if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+    if not is_user_subscribed(update.effective_user.id):
+        await show_subscription_plans(update, context)
         return
+    
+    user_id = update.effective_user.id
     stats = load_stats()
     accounts_status = account_manager.get_accounts_status()
-    await update.message.reply_text(
-        f"📊 **Statistics Dashboard**\n\n"
-        f"🔢 **Total Checked:** {stats['total_checked']}\n"
-        f"🗑️ **Total Deleted:** {stats['total_deleted']}\n"
-        f"📅 **Today Checked:** {stats['today_checked']}\n"
-        f"🗑️ **Today Deleted:** {stats['today_deleted']}\n\n"
-        f"📱 **Account Status:**\n"
-        f"• Total: {accounts_status['total']}\n"
-        f"• Active: {accounts_status['active']}\n"
-        f"• Inactive: {accounts_status['inactive']}\n"
-        f"• Current Usage: {sum(accounts_status['usage'].values())}/{accounts_status['active'] * MAX_PER_ACCOUNT}",
-        parse_mode='Markdown'
-    )
+    
+    # User এর subscription info নিন
+    sub_info = get_user_subscription_info(user_id)
+    
+    # Admin এবং regular user এর জন্য আলাদা message
+    if user_id == ADMIN_ID:
+        message = (
+            f"📊 **Statistics Dashboard** 👑\n\n"
+            f"🔢 **Total Checked:** {stats['total_checked']}\n"
+            f"🗑️ **Total Deleted:** {stats['total_deleted']}\n"
+            f"📅 **Today Checked:** {stats['today_checked']}\n"
+            f"🗑️ **Today Deleted:** {stats['today_deleted']}\n\n"
+            f"📱 **Account Status:**\n"
+            f"• Total: {accounts_status['total']}\n"
+            f"• Active: {accounts_status['active']}\n"
+            f"• Inactive: {accounts_status['inactive']}\n"
+            f"• Current Usage: {sum(accounts_status['usage'].values())}/{accounts_status['active'] * MAX_PER_ACCOUNT}\n\n"
+            f"⚡ **Remaining Checks:** {account_manager.get_remaining_checks()}"
+        )
+    else:
+        # Regular user এর জন্য subscription status সহ message
+        if sub_info and sub_info['active']:
+            subscription_status = (
+                f"📅 **Subscription Status:** ✅ Active\n"
+                f"⏰ **Remaining Time:** {sub_info['remaining_days']}d {sub_info['remaining_hours']}h {sub_info['remaining_minutes']}m\n"
+                f"📆 **Valid Until:** {sub_info['end_date'].strftime('%Y-%m-%d %H:%M')}"
+            )
+        else:
+            subscription_status = "📅 **Subscription Status:** ❌ Inactive"
+        
+        message = (
+            f"📊 **Statistics Dashboard**\n\n"
+            f"🔢 **Total Checked:** {stats['total_checked']}\n"
+            
+            f"📅 **Today Checked:** {stats['today_checked']}\n\n"
+           
+            f"{subscription_status}\n\n"
+            f"📱 **Server Status:**\n"
+            f"• Active Servers: {accounts_status['active']}\n"
+            f"• Available Checks: {account_manager.get_remaining_checks()}"
+        )
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
+
+async def admin_users(update: Update, context: CallbackContext) -> None:
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Admin only command!")
+        return
+    users = load_users()
+    
+    # Ensure users is a dictionary
+    if not isinstance(users, dict):
+        users = {}
+        
+    if not users:
+        await update.message.reply_text("❌ No users in database!")
+        return
+    keyboard = []
+    for user_id, user_data in users.items():
+        if int(user_id) == ADMIN_ID:
+            continue
+        status = "✅" if user_data["approved"] else "⏳" if user_data["pending"] else "❌"
+        button_text = f"{status} {user_data['username']}"
+        if user_data["pending"]:
+            keyboard.append([
+                InlineKeyboardButton(button_text, callback_data=f"user_{user_id}"),
+                InlineKeyboardButton("✅ Allow", callback_data=f"allow_{user_id}"),
+                InlineKeyboardButton("❌ Deny", callback_data=f"deny_{user_id}")
+            ])
+        else:
+            keyboard.append([
+                InlineKeyboardButton(button_text, callback_data=f"user_{user_id}"),
+                InlineKeyboardButton("🔄 Toggle", callback_data=f"toggle_{user_id}")
+            ])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    msg = "👥 **User Management**\n\n"
+    msg += "✅ - Approved\n⏳ - Pending\n❌ - Denied\n\n"
+    msg += "Click buttons to manage users:"
+    await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
 
 async def handle_approval(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -791,42 +1301,6 @@ async def handle_approval(update: Update, context: CallbackContext) -> None:
             user_id,
             "❌ Your access request has been denied by admin."
         )
-
-async def admin_users(update: Update, context: CallbackContext) -> None:
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Admin only command!")
-        return
-    users = load_users()
-    
-    # Ensure users is a dictionary
-    if not isinstance(users, dict):
-        users = {}
-        
-    if not users:
-        await update.message.reply_text("❌ No users in database!")
-        return
-    keyboard = []
-    for user_id, user_data in users.items():
-        if int(user_id) == ADMIN_ID:
-            continue
-        status = "✅" if user_data["approved"] else "⏳" if user_data["pending"] else "❌"
-        button_text = f"{status} {user_data['username']}"
-        if user_data["pending"]:
-            keyboard.append([
-                InlineKeyboardButton(button_text, callback_data=f"user_{user_id}"),
-                InlineKeyboardButton("✅ Allow", callback_data=f"allow_{user_id}"),
-                InlineKeyboardButton("❌ Deny", callback_data=f"deny_{user_id}")
-            ])
-        else:
-            keyboard.append([
-                InlineKeyboardButton(button_text, callback_data=f"user_{user_id}"),
-                InlineKeyboardButton("🔄 Toggle", callback_data=f"toggle_{user_id}")
-            ])
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    msg = "👥 **User Management**\n\n"
-    msg += "✅ - Approved\n⏳ - Pending\n❌ - Denied\n\n"
-    msg += "Click buttons to manage users:"
-    await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode='Markdown')
 
 async def handle_user_management(update: Update, context: CallbackContext) -> None:
     query = update.callback_query
@@ -896,19 +1370,21 @@ async def list_accounts(update: Update, context: CallbackContext) -> None:
     await update.message.reply_text(msg, parse_mode='Markdown')
 
 async def one_click_login(update: Update, context: CallbackContext) -> None:
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Admin only command!")
+    # Admin এবং subscribed users উভয়ই access পাবে
+    if update.effective_user.id != ADMIN_ID and not is_user_subscribed(update.effective_user.id):
+        await update.message.reply_text("❌ Subscription required! Please purchase a subscription to use this feature.")
         return
-    processing_msg = await update.message.reply_text("🔄 সব অ্যাকাউন্ট লগইন করা হচ্ছে...")
+        
+    processing_msg = await update.message.reply_text("🔄 Proccessing...")
     successful_logins = await account_manager.login_all_accounts()
     accounts_status = account_manager.get_accounts_status()
     await processing_msg.edit_text(
-        f"✅ **ওয়ান-ক্লিক লগইন সম্পূর্ণ!**\n\n"
-        f"📊 **রেজাল্ট:**\n"
-        f"• সফল লগইন: {successful_logins}\n"
-        f"• ব্যর্থ: {len(account_manager.accounts) - successful_logins}\n"
-        f"• মোট এক্টিভ: {accounts_status['active']}\n\n"
-        f"⚡ **Available Checks:** {account_manager.get_remaining_checks()}"
+        f"✅ Server Refresh Successfull\n\n"
+        f"📊 Result:\n"
+        f"• Success: {successful_logins}\n"
+        f"• Failed: {len(account_manager.accounts) - successful_logins}\n"
+        f"• Total active: {accounts_status['active']}\n\n"
+        f"⚡ Available Checks: {account_manager.get_remaining_checks()}"
     )
 
 async def one_click_logout(update: Update, context: CallbackContext) -> None:
@@ -919,7 +1395,7 @@ async def one_click_logout(update: Update, context: CallbackContext) -> None:
     await account_manager.logout_all_accounts()
     await processing_msg.edit_text(
         "✅ **সব অ্যাকাউন্ট সফলভাবে লগআউট করা হয়েছে!**\n\n"
-        "আপনি আবার লগইন করতে চাইলে \"🚀 ওয়ান-ক্লিক লগইন\" বাটন ব্যবহার করুন।"
+        "আপনি আবার লগইন করতে চাইলে \"🚀 Refresh Server\" বাটন ব্যবহার করুন।"
     )
 
 async def restart_bot(update: Update, context: CallbackContext) -> None:
@@ -958,26 +1434,7 @@ async def logout_account(update: Update, context: CallbackContext) -> None:
             return
     await update.message.reply_text("❌ অ্যাকাউন্ট পাওয়া যায়নি!")
 
-async def help_command(update: Update, context: CallbackContext) -> None:
-    if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
-        return
-    await update.message.reply_text(
-        "❓ **সাহায্য:**\n\n"
-        "📱 **নম্বর চেক:** সরাসরি নম্বর পাঠান\n"
-        "➕ **অ্যাকাউন্ট যোগ:** `username:password`\n"
-        "📋 **লিস্ট:** সব অ্যাকাউন্ট দেখুন\n"
-        "🚀 **ওয়ান-ক্লিক লগইন:** সব অ্যাকাউন্ট লগইন\n"
-        "🚪 **ওয়ান-ক্লিক লগআউট:** সব অ্যাকাউন্ট লগআউট\n"
-        "🔄 **রিস্টার্ট:** বট রিস্টার্ট করুন\n"
-        "📊 **Statistics:** Check deletion counts\n\n"
-        "**ফিচার:**\n"
-        "• অটো টোকেন রিনিউ\n"
-        "• লোড ব্যালেন্সিং\n"
-        "• রিয়েল-টাইম স্ট্যাটাস আপডেট\n"
-        "• ওয়ান-ক্লিক ম্যানেজমেন্ট",
-        parse_mode='Markdown'
-    )
+
 
 # Async number adding with serial number
 async def async_add_number_optimized(token, phone, msg, username, serial_number=None):
@@ -1001,7 +1458,6 @@ async def async_add_number_optimized(token, phone, msg, username, serial_number=
         await msg.edit_text(f"{prefix}`{phone}` ❌ Add Failed", parse_mode='Markdown')
         account_manager.release_token(username)
 
-# Process multiple numbers from a single message with serial numbers
 # Process multiple numbers from a single message
 async def process_multiple_numbers(update: Update, context: CallbackContext, text: str):
     """Process multiple phone numbers from a single message"""
@@ -1051,21 +1507,32 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
             )
             
 async def handle_message_optimized(update: Update, context: CallbackContext) -> None:
-    if not is_user_approved(update.effective_user.id):
-        await update.message.reply_text("❌ You are not approved to use this bot!")
+    user_id = update.effective_user.id
+    
+    # Admin এবং subscribed users উভয়ই access পাবে
+    if user_id != ADMIN_ID and not is_user_subscribed(user_id):
+        await show_subscription_plans(update, context)
         return
+    
     text = update.message.text.strip()
     
-    # Handle menu buttons (only for admin)
-    if update.effective_user.id == ADMIN_ID:
+    # Handle menu buttons (admin এবং subscribed users উভয়ের জন্য)
+    if user_id == ADMIN_ID or is_user_subscribed(user_id):
+        if text == "🚀 Refresh Server":
+            await one_click_login(update, context)
+            return
         if text == "📊 Statistics":
             await show_stats(update, context)
             return
+        
+    
+    # Handle menu buttons (শুধু admin এর জন্য)
+    if user_id == ADMIN_ID:
         if text == "👥 User Management":
             await admin_users(update, context)
             return
-        if text == "🚀 ওয়ান-ক্লিক লগইন":
-            await one_click_login(update, context)
+        if text == "📅 Subscription Management":
+            await subscription_management(update, context)
             return
         if text == "🚪 ওয়ান-ক্লিক লগআউট":
             await one_click_logout(update, context)
@@ -1078,9 +1545,6 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
             return
         if text == "📋 অ্যাকাউন্ট লিস্ট":
             await list_accounts(update, context)
-            return
-        if text == "❓ সাহায্য":
-            await help_command(update, context)
             return
     
     # Handle account addition (username:password) - only for admin
@@ -1151,7 +1615,8 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
     if update.effective_user.id == ADMIN_ID:
         await update.message.reply_text("❓ নম্বর পাঠান বা মেনু ব্যবহার করুন!")
     else:
-        await update.message.reply_text("❓ শুধু নম্বর পাঠান!")
+        # Subscribed users কেও menu options remind করবে
+        await update.message.reply_text("❓ নম্বর পাঠান বা মেনু বাটন ব্যবহার করুন!")
 
 # Run FastAPI server
 def run_fastapi():
@@ -1187,12 +1652,16 @@ def main():
     application.add_handler(CommandHandler("logout", logout_account))
     application.add_handler(CommandHandler("admin_users", admin_users))
     application.add_handler(CommandHandler("restart", restart_bot))
+    application.add_handler(CommandHandler("addsub", add_subscription))
+    application.add_handler(CommandHandler("removesub", remove_subscription))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message_optimized))
     application.add_handler(CallbackQueryHandler(handle_approval, pattern=r"^(allow|deny)_"))
     application.add_handler(CallbackQueryHandler(handle_user_management, pattern=r"^(user|toggle)_"))
+    application.add_handler(CallbackQueryHandler(handle_subscription_callback, pattern=r"^(plan_|confirm_|admin_|back_to_plans)"))
     
     if application.job_queue:
         application.job_queue.run_repeating(reset_daily_stats, interval=86400, first=0)
+        application.job_queue.run_repeating(check_subscription_expiry, interval=1800, first=0)  # Check every 30 minutes
     else:
         print("❌ JobQueue not available, daily stats reset not scheduled")
     
