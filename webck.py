@@ -1097,8 +1097,11 @@ async def check_subscription_expiry(context: CallbackContext):
         time_remaining = end_date - now
         remaining_hours = time_remaining.total_seconds() / 3600
         
-        # Notify when 1 hour remaining
-        if 0 < remaining_hours <= 1:
+        # Check if we've already notified this user about expiry
+        notified_key = f"expiry_notified_{user_id}"
+        
+        # Notify when 1 hour remaining (only once)
+        if 0 < remaining_hours <= 1 and not sub_data.get('notified_1hour'):
             try:
                 await context.bot.send_message(
                     int(user_id),
@@ -1107,11 +1110,15 @@ async def check_subscription_expiry(context: CallbackContext):
                     "Please renew to continue using the bot.\n\n"
                     "Use /start to view subscription plans."
                 )
+                # Mark as notified
+                sub_data['notified_1hour'] = True
+                subscriptions[user_id] = sub_data
+                save_subscriptions(subscriptions)
             except Exception as e:
                 print(f"❌ Could not send expiry notification to {user_id}: {e}")
         
-        # Notify when expired
-        elif remaining_hours <= 0:
+        # Notify when expired (only once)
+        elif remaining_hours <= 0 and not sub_data.get('notified_expired'):
             try:
                 await context.bot.send_message(
                     int(user_id),
@@ -1120,9 +1127,23 @@ async def check_subscription_expiry(context: CallbackContext):
                     "Please renew to continue using the bot.\n\n"
                     "Use /start to view subscription plans."
                 )
+                # Mark as notified
+                sub_data['notified_expired'] = True
+                subscriptions[user_id] = sub_data
+                save_subscriptions(subscriptions)
             except Exception as e:
                 print(f"❌ Could not send expired notification to {user_id}: {e}")
-
+        
+        # Reset notifications if subscription is renewed
+        elif remaining_hours > 1 and (sub_data.get('notified_1hour') or sub_data.get('notified_expired')):
+            # Clear notifications if subscription is active again
+            if 'notified_1hour' in sub_data:
+                del sub_data['notified_1hour']
+            if 'notified_expired' in sub_data:
+                del sub_data['notified_expired']
+            subscriptions[user_id] = sub_data
+            save_subscriptions(subscriptions)
+            
 # Bot command handlers
 async def start(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
