@@ -786,7 +786,7 @@ async def add_subscription(update: Update, context: CallbackContext):
             'end_date': end_date.isoformat(),
             'plan_days': days,
             'added_by': update.effective_user.id,
-            'added_at': datetime.now().isoformat()
+            'added_at': datetime.now().isoformat(),
             'expiry_notification_sent': False
         }
         
@@ -891,7 +891,7 @@ async def handle_subscription_callback(update: Update, context: CallbackContext)
                 'end_date': end_date.isoformat(),
                 'plan_days': plan['days'],
                 'added_by': query.from_user.id,
-                'added_at': datetime.now().isoformat()
+                'added_at': datetime.now().isoformat(),
                 'expiry_notification_sent': False
             }
             
