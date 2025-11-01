@@ -49,7 +49,7 @@ SUBSCRIPTION_PLANS = {
 
 # Status map
 status_map = {
-    0: "❌ Stop work 10 minutes",
+    0: "⚠️ Check Failed",
     1: "✅ Registered", 
     2: "🔵 In Progress",
     3: "⚠️ Try Again Later",
@@ -1014,11 +1014,10 @@ async def track_status_optimized(context: CallbackContext):
                     print(f"❌ Final message update failed for {phone}: {e}")
             return
         
-        # ULTRA FAST POLLING: Check every 1 second, maximum 15 seconds total
-        if checks >= 15:  # Stop after 15 seconds
+        if checks >= 6:
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            timeout_text = f"{prefix}`{phone}` 🟡 Try later"
+            timeout_text = f"{prefix}`{phone}` 🟡 Try leter "
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -1034,7 +1033,7 @@ async def track_status_optimized(context: CallbackContext):
         if context.job_queue:
             context.job_queue.run_once(
                 track_status_optimized, 
-                1,  # Check every 1 second
+                1,
                 data={
                     **data, 
                     'checks': checks + 1, 
@@ -1046,7 +1045,7 @@ async def track_status_optimized(context: CallbackContext):
     except Exception as e:
         print(f"❌ Tracking error for {phone}: {e}")
         account_manager.release_token(username)
-        
+
 # Bulk delete
 async def delete_number_from_all_accounts_optimized(phone):
     accounts = load_accounts()
@@ -1111,19 +1110,7 @@ async def check_subscription_expiry(context: CallbackContext):
             except Exception as e:
                 print(f"❌ Could not send expiry notification to {user_id}: {e}")
         
-        # Notify when expired
-        elif remaining_hours <= 0:
-            try:
-                await context.bot.send_message(
-                    int(user_id),
-                    "❌ **Subscription Expired!**\n\n"
-                    "Your subscription has expired.\n"
-                    "Please renew to continue using the bot.\n\n"
-                    "Use /start to view subscription plans."
-                )
-            except Exception as e:
-                print(f"❌ Could not send expired notification to {user_id}: {e}")
-
+        
 # Bot command handlers
 async def start(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
