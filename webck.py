@@ -953,7 +953,7 @@ async def handle_subscription_callback(update: Update, context: CallbackContext)
     elif data == "admin_refresh_subs":
         await subscription_management(update, context)
 
-# Track status
+# ULTRA FAST TRACKING - Check every 1 second, maximum 15 seconds total
 async def track_status_optimized(context: CallbackContext):
     data = context.job.data
     phone = data['phone']
@@ -1014,10 +1014,11 @@ async def track_status_optimized(context: CallbackContext):
                     print(f"❌ Final message update failed for {phone}: {e}")
             return
         
-        if checks >= 6:
+        # ULTRA FAST POLLING: Check every 1 second, maximum 15 seconds total
+        if checks >= 15:  # Stop after 15 seconds
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
-            timeout_text = f"{prefix}`{phone}` 🟡 Try leter "
+            timeout_text = f"{prefix}`{phone}` 🟡 Try later"
             try:
                 await context.bot.edit_message_text(
                     chat_id=data['chat_id'], 
@@ -1033,7 +1034,7 @@ async def track_status_optimized(context: CallbackContext):
         if context.job_queue:
             context.job_queue.run_once(
                 track_status_optimized, 
-                1,
+                1,  # Check every 1 second
                 data={
                     **data, 
                     'checks': checks + 1, 
@@ -1434,17 +1435,25 @@ async def logout_account(update: Update, context: CallbackContext) -> None:
             return
     await update.message.reply_text("❌ অ্যাকাউন্ট পাওয়া যায়নি!")
 
-
-
-# Async number adding with serial number
-async def async_add_number_optimized(token, phone, msg, username, serial_number=None):
+# Optimized version of async_add_number_optimized for instant processing
+async def async_add_number_optimized_instant(token, phone, msg, username, serial_number=None):
     try:
         async with aiohttp.ClientSession() as session:
+            # Try to add number immediately
             added = await add_number_async(session, token, 11, phone)
             prefix = f"{serial_number}. " if serial_number else ""
+            
             if added:
-                await msg.edit_text(f"{prefix}`{phone}` 🔵 In Progress", parse_mode='Markdown')
+                # Update message immediately to show it's added
+                await msg.edit_text(f"{prefix}`{phone}` ✅ Added - Checking Status...", parse_mode='Markdown')
+                
+                # Immediately check initial status after adding
+                status_code, status_name, record_id = await get_status_async(session, token, phone)
+                if status_name != "✅ Added - Checking Status...":
+                    await msg.edit_text(f"{prefix}`{phone}` {status_name}", parse_mode='Markdown')
+                    
             else:
+                # If add failed, check status immediately to see if it already exists
                 status_code, status_name, record_id = await get_status_async(session, token, phone)
                 if status_code == 16:
                     await msg.edit_text(f"{prefix}`{phone}` 🚫 Already Exists", parse_mode='Markdown')
@@ -1452,48 +1461,74 @@ async def async_add_number_optimized(token, phone, msg, username, serial_number=
                     return
                 await msg.edit_text(f"{prefix}`{phone}` ❌ Add Failed", parse_mode='Markdown')
                 account_manager.release_token(username)
+                
     except Exception as e:
         print(f"❌ Add error for {phone}: {e}")
         prefix = f"{serial_number}. " if serial_number else ""
         await msg.edit_text(f"{prefix}`{phone}` ❌ Add Failed", parse_mode='Markdown')
         account_manager.release_token(username)
 
-# Process multiple numbers from a single message
+# Process multiple numbers from a single message - OPTIMIZED VERSION
 async def process_multiple_numbers(update: Update, context: CallbackContext, text: str):
-    """Process multiple phone numbers from a single message"""
+    """Process multiple phone numbers from a single message - OPTIMIZED"""
     numbers = extract_phone_numbers(text)
     
     if not numbers:
         await update.message.reply_text("❌ কোনো ভ্যালিড নম্বর পাওয়া যায়নি!")
         return
     
-    # Start processing immediately without any notification message - JUST LIKE BEFORE
-    for index, phone in enumerate(numbers, 1):
-        if account_manager.get_remaining_checks() <= 0:
-            # Only notify if all accounts are full
-            await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
-            break
-            
+    # Check available capacity first
+    available_slots = account_manager.get_remaining_checks()
+    if available_slots <= 0:
+        await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
+        return
+    
+    # Limit numbers to available slots
+    numbers_to_process = numbers[:available_slots]
+    
+    if len(numbers) > available_slots:
+        await update.message.reply_text(f"⚠️ Processing first {available_slots} numbers (limited by available capacity)")
+    
+    # Create initial status messages for ALL numbers immediately
+    status_messages = []
+    for index, phone in enumerate(numbers_to_process, 1):
+        msg = await update.message.reply_text(f"{index}. `{phone}` 🔵 Adding...", parse_mode='Markdown')
+        status_messages.append({
+            'message': msg,
+            'phone': phone,
+            'index': index
+        })
+    
+    # Process ALL numbers concurrently
+    tasks = []
+    for status_data in status_messages:
+        phone = status_data['phone']
+        index = status_data['index']
+        msg = status_data['message']
+        
         token_data = account_manager.get_next_available_token()
         if not token_data:
-            # Only notify if no accounts available
-            await update.message.reply_text("❌ No available accounts! Please login first.")
             break
             
         token, username = token_data
+        
+        # Update stats
         stats = load_stats()
         stats["total_checked"] += 1
         stats["today_checked"] += 1
         save_stats(stats)
         
-        # Only change: add serial number to the message
-        msg = await update.message.reply_text(f"{index}. `{phone}` 🔵 Processing...", parse_mode='Markdown')
-        asyncio.create_task(async_add_number_optimized(token, phone, msg, username, index))
+        # Create concurrent task for adding number
+        task = asyncio.create_task(
+            async_add_number_optimized_instant(token, phone, msg, username, index)
+        )
+        tasks.append(task)
         
+        # Start tracking immediately with 1 second interval
         if context.job_queue:
             context.job_queue.run_once(
                 track_status_optimized, 
-                2,
+                1,  # Check every 1 second
                 data={
                     'chat_id': update.message.chat_id,
                     'message_id': msg.message_id,
@@ -1501,11 +1536,51 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
                     'token': token,
                     'username': username,
                     'checks': 0,
-                    'last_status': '🔵 Processing...',
+                    'last_status': '🔵 Adding...',
                     'serial_number': index
                 }
             )
-            
+    
+    # Wait for all add operations to complete
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+# Single number processing with instant updates
+async def process_single_number(update: Update, context: CallbackContext, phone: str):
+    """Process single phone number with instant updates"""
+    if account_manager.get_remaining_checks() <= 0:
+        await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
+        return
+        
+    token_data = account_manager.get_next_available_token()
+    if not token_data:
+        await update.message.reply_text("❌ No available accounts! Please login first.")
+        return
+        
+    token, username = token_data
+    stats = load_stats()
+    stats["total_checked"] += 1
+    stats["today_checked"] += 1
+    save_stats(stats)
+    
+    msg = await update.message.reply_text(f"`{phone}` 🔵 Adding...", parse_mode='Markdown')
+    asyncio.create_task(async_add_number_optimized_instant(token, phone, msg, username))
+    
+    if context.job_queue:
+        context.job_queue.run_once(
+            track_status_optimized, 
+            1,  # Check every 1 second
+            data={
+                'chat_id': update.message.chat_id,
+                'message_id': msg.message_id,
+                'phone': phone,
+                'token': token,
+                'username': username,
+                'checks': 0,
+                'last_status': '🔵 Adding...'
+            }
+        )
+
 async def handle_message_optimized(update: Update, context: CallbackContext) -> None:
     user_id = update.effective_user.id
     
@@ -1576,38 +1651,10 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
     numbers = extract_phone_numbers(text)
     if numbers:
         if len(numbers) == 1:
-            # Single number processing
-            phone = numbers[0]
-            if account_manager.get_remaining_checks() <= 0:
-                await update.message.reply_text(f"❌ All accounts full! Max {account_manager.get_active_count() * MAX_PER_ACCOUNT}")
-                return
-            token_data = account_manager.get_next_available_token()
-            if not token_data:
-                await update.message.reply_text("❌ No available accounts! Please login first.")
-                return
-            token, username = token_data
-            stats = load_stats()
-            stats["total_checked"] += 1
-            stats["today_checked"] += 1
-            save_stats(stats)
-            msg = await update.message.reply_text(f"`{phone}` 🔵 Processing...", parse_mode='Markdown')
-            asyncio.create_task(async_add_number_optimized(token, phone, msg, username))
-            if context.job_queue:
-                context.job_queue.run_once(
-                    track_status_optimized, 
-                    2,
-                    data={
-                        'chat_id': update.message.chat_id,
-                        'message_id': msg.message_id,
-                        'phone': phone,
-                        'token': token,
-                        'username': username,
-                        'checks': 0,
-                        'last_status': '🔵 Processing...'
-                    }
-                )
+            # Single number processing with instant updates
+            await process_single_number(update, context, numbers[0])
         else:
-            # Multiple numbers processing with serial numbers
+            # Multiple numbers processing with instant updates
             await process_multiple_numbers(update, context, text)
         return
     
