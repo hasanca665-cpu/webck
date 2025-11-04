@@ -86,7 +86,8 @@ async def ping():
 async def keep_alive_enhanced():
     """Enhanced keep-alive with multiple strategies"""
     keep_alive_urls = [
-        "https://webck.onrender.com/ping"
+    "https://webck.onrender.com/ping",
+    "https://wslink.onrender.com/ping"
     ]
     
     while True:
