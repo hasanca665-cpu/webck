@@ -28,6 +28,9 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = "8341377704:AAF8yfGc0jxBn0INh037g-O_YZMKfrtBnSk"
 BASE_URL = "http://8.222.182.223:8081"
 
+# Render-compatible port
+RENDER_PORT = int(os.environ.get("PORT", 10000))
+
 # File paths with Render.com compatibility
 ACCOUNTS_FILE = "/tmp/accounts.json" if 'RENDER' in os.environ else "accounts.json"
 USERS_FILE = "/tmp/users.json" if 'RENDER' in os.environ else "users.json" 
@@ -76,18 +79,23 @@ app = FastAPI()
 
 @app.get("/")
 async def root():
-    return {"message": "🤖 Python Number Checker Bot is Running!"}
+    return {"message": "🤖 Python Number Checker Bot is Running!", "status": "active", "timestamp": datetime.now().isoformat()}
 
 @app.get("/ping")
 async def ping():
-    return {"message": "Bot is alive!"}
+    return {"message": "Bot is alive!", "status": "ok"}
 
-# Enhanced keep-alive system
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "bot": "online"}
+
+# Enhanced keep-alive system for Render
 async def keep_alive_enhanced():
-    """Enhanced keep-alive with multiple strategies"""
+    """Enhanced keep-alive with multiple strategies for Render"""
     keep_alive_urls = [
-    "https://webck-9utn.onrender.com",
-    "https://wslink.onrender.com/ping"
+        "https://webck-9utn.onrender.com",
+        "https://webck-9utn.onrender.com/ping",
+        "https://webck-9utn.onrender.com/health"
     ]
     
     while True:
@@ -101,22 +109,22 @@ async def keep_alive_enhanced():
                 except Exception as e:
                     print(f"⚠️ Keep-alive ping failed for {url}: {e}")
             
-            # Wait for next ping cycle (5 minutes)
-            await asyncio.sleep(5 * 60)
+            # Wait for next ping cycle (3 minutes for Render)
+            await asyncio.sleep(3 * 60)
             
         except Exception as e:
             print(f"❌ Keep-alive system error: {e}")
-            await asyncio.sleep(5 * 60)
+            await asyncio.sleep(3 * 60)
 
 async def random_ping():
     """Additional random pings to avoid pattern detection"""
     while True:
         try:
-            random_time = random.randint(3 * 60, 8 * 60)  # 3-8 minutes
+            random_time = random.randint(2 * 60, 5 * 60)  # 2-5 minutes for Render
             await asyncio.sleep(random_time)
             
             async with aiohttp.ClientSession() as session:
-                async with session.get("https://webck.onrender.com", timeout=10) as response:
+                async with session.get("https://webck-9utn.onrender.com", timeout=10) as response:
                     print(f"🎲 Random ping sent: Status {response.status}")
                     
         except Exception as e:
@@ -127,7 +135,7 @@ async def immediate_ping():
     await asyncio.sleep(30)  # Wait 30 seconds after startup
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get("https://webck.onrender.com", timeout=10) as response:
+            async with session.get("https://webck-9utn.onrender.com", timeout=10) as response:
                 print(f"🚀 Immediate startup ping: Status {response.status}")
     except Exception as e:
         print(f"⚠️ Immediate ping failed: {e}")
@@ -1607,15 +1615,22 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
         # Subscribed users কেও menu options remind করবে
         await update.message.reply_text("❓ নম্বর পাঠান বা মেনু বাটন ব্যবহার করুন!")
 
-# Run FastAPI server
+# Run FastAPI server with Render PORT
 def run_fastapi():
-    uvicorn.run(app, host="0.0.0.0", port=10000)
+    uvicorn.run(
+        app, 
+        host="0.0.0.0", 
+        port=RENDER_PORT,
+        access_log=False
+    )
 
 def main():
+    print(f"🚀 Starting Bot on Render (Port: {RENDER_PORT})...")
+    
     # Start FastAPI server in a separate thread
     fastapi_thread = threading.Thread(target=run_fastapi, daemon=True)
     fastapi_thread.start()
-    print("🌐 FastAPI server started on port 10000")
+    print(f"🌐 FastAPI server started on port {RENDER_PORT}")
     
     # Initialize bot
     loop = asyncio.new_event_loop()
@@ -1655,7 +1670,17 @@ def main():
         print("❌ JobQueue not available, daily stats reset not scheduled")
     
     print("🚀 Bot starting polling with 24/7 keep-alive...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    try:
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True
+        )
+    except Exception as e:
+        print(f"❌ Bot error: {e}")
+        # Auto-restart after 10 seconds
+        time.sleep(10)
+        main()
 
 if __name__ == "__main__":
     main()
