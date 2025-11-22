@@ -89,57 +89,23 @@ async def ping():
 async def health():
     return {"status": "healthy", "bot": "online"}
 
-# Enhanced keep-alive system for Render
-async def keep_alive_enhanced():
-    """Enhanced keep-alive with multiple strategies for Render"""
-    keep_alive_urls = [
-        "https://webck-9utn.onrender.com",
-        "https://webck-9utn.onrender.com/ping",
-        "https://webck-9utn.onrender.com/health",
-        "https://wslink-ui5u.onrender.com"
-    ]
+# Optimized keep-alive for better performance
+async def optimized_keep_alive():
+    """Lightweight keep-alive to prevent Render sleep"""
+    bot_url = "https://webck-9utn.onrender.com"
     
     while True:
         try:
-            for url in keep_alive_urls:
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(url, timeout=10) as response:
-                            print(f"🔄 Keep-alive ping to {url}: Status {response.status}")
-                            await asyncio.sleep(2)  # Small delay between pings
-                except Exception as e:
-                    print(f"⚠️ Keep-alive ping failed for {url}: {e}")
-            
-            # Wait for next ping cycle (3 minutes for Render)
-            await asyncio.sleep(3 * 60)
-            
-        except Exception as e:
-            print(f"❌ Keep-alive system error: {e}")
-            await asyncio.sleep(3 * 60)
-
-async def random_ping():
-    """Additional random pings to avoid pattern detection"""
-    while True:
-        try:
-            random_time = random.randint(2 * 60, 5 * 60)  # 2-5 minutes for Render
-            await asyncio.sleep(random_time)
-            
             async with aiohttp.ClientSession() as session:
-                async with session.get("https://webck-9utn.onrender.com", timeout=10) as response:
-                    print(f"🎲 Random ping sent: Status {response.status}")
-                    
+                async with session.get(f"{bot_url}/health", timeout=5) as response:
+                    print(f"✅ Keep-alive: Status {response.status}")
+            
+            # 5 minutes interval to reduce resource usage
+            await asyncio.sleep(300)
+            
         except Exception as e:
-            print(f"⚠️ Random ping failed: {e}")
-
-async def immediate_ping():
-    """Immediate ping on startup"""
-    await asyncio.sleep(30)  # Wait 30 seconds after startup
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get("https://webck-9utn.onrender.com", timeout=10) as response:
-                print(f"🚀 Immediate startup ping: Status {response.status}")
-    except Exception as e:
-        print(f"⚠️ Immediate ping failed: {e}")
+            print(f"⚠️ Keep-alive failed: {e}")
+            await asyncio.sleep(300)
 
 # Enhanced file operations with error handling
 def load_accounts():
@@ -357,12 +323,12 @@ def get_user_subscription_info(user_id):
         'total_remaining_hours': remaining_days * 24 + remaining_hours
     }
 
-# Async login
+# Faster async login
 async def login_api_async(username, password):
     try:
         async with aiohttp.ClientSession() as session:
             payload = {"account": username, "password": password, "identity": "Member"}
-            async with session.post(f"{BASE_URL}/user/login", json=payload, timeout=10) as response:
+            async with session.post(f"{BASE_URL}/user/login", json=payload, timeout=8) as response:  # Reduced timeout
                 if response.status == 200:
                     data = await response.json()
                     if data and "data" in data and "token" in data["data"]:
@@ -402,7 +368,7 @@ async def add_number_async(session, token, cc, phone, retry_count=2):
         try:
             headers = {"Admin-Token": token}
             add_url = f"{BASE_URL}/z-number-base/addNum?cc={cc}&phoneNum={phone}&smsStatus=2"
-            async with session.post(add_url, headers=headers, timeout=10) as response:
+            async with session.post(add_url, headers=headers, timeout=8) as response:  # Reduced timeout
                 if response.status == 200:
                     print(f"✅ Number {phone} added successfully")
                     return True
@@ -418,12 +384,12 @@ async def add_number_async(session, token, cc, phone, retry_count=2):
             print(f"❌ Add number error for {phone} (attempt {attempt + 1}): {e}")
     return False
 
-# Status checking
+# Faster status checking
 async def get_status_async(session, token, phone):
     try:
         headers = {"Admin-Token": token}
         status_url = f"{BASE_URL}/z-number-base/getAullNum?page=1&pageSize=15&phoneNum={phone}"
-        async with session.get(status_url, headers=headers, timeout=10) as response:
+        async with session.get(status_url, headers=headers, timeout=8) as response:  # Reduced timeout
             if response.status == 401:
                 print(f"❌ Token expired for {phone}")
                 return -1, "❌ Token Expired", None
@@ -463,7 +429,7 @@ async def delete_single_number_async(session, token, record_id, username):
     try:
         headers = {"Admin-Token": token}
         delete_url = f"{BASE_URL}/z-number-base/deleteNum/{record_id}"
-        async with session.delete(delete_url, headers=headers, timeout=10) as response:
+        async with session.delete(delete_url, headers=headers, timeout=8) as response:  # Reduced timeout
             if response.status == 200:
                 return True
             else:
@@ -963,7 +929,7 @@ async def handle_subscription_callback(update: Update, context: CallbackContext)
     elif data == "admin_refresh_subs":
         await subscription_management(update, context)
 
-# Track status
+# Optimized status tracking with faster intervals
 async def track_status_optimized(context: CallbackContext):
     data = context.job.data
     phone = data['phone']
@@ -1010,7 +976,8 @@ async def track_status_optimized(context: CallbackContext):
         final_states = [0, 1, 4, 7, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         if status_code in final_states:
             account_manager.release_token(username)
-            deleted_count = await delete_number_from_all_accounts_optimized(phone)
+            # Async delete for better performance
+            asyncio.create_task(delete_number_from_all_accounts_optimized(phone))
             final_text = f"{prefix}`{phone}` {status_name}"
             try:
                 await context.bot.edit_message_text(
@@ -1024,9 +991,9 @@ async def track_status_optimized(context: CallbackContext):
                     print(f"❌ Final message update failed for {phone}: {e}")
             return
         
-        if checks >= 6:
+        if checks >= 8:  # Increased checks for better accuracy
             account_manager.release_token(username)
-            deleted_count = await delete_number_from_all_accounts_optimized(phone)
+            asyncio.create_task(delete_number_from_all_accounts_optimized(phone))
             timeout_text = f"{prefix}`{phone}` 🟡 Try leter "
             try:
                 await context.bot.edit_message_text(
@@ -1041,9 +1008,10 @@ async def track_status_optimized(context: CallbackContext):
             return
         
         if context.job_queue:
+            # Faster checking interval - 1.5 seconds
             context.job_queue.run_once(
                 track_status_optimized, 
-                1,
+                1.5,
                 data={
                     **data, 
                     'checks': checks + 1, 
@@ -1119,7 +1087,6 @@ async def check_subscription_expiry(context: CallbackContext):
                 )
             except Exception as e:
                 print(f"❌ Could not send expiry notification to {user_id}: {e}")
-        
         
 # Bot command handlers
 async def start(update: Update, context: CallbackContext) -> None:
@@ -1432,9 +1399,7 @@ async def logout_account(update: Update, context: CallbackContext) -> None:
             return
     await update.message.reply_text("❌ অ্যাকাউন্ট পাওয়া যায়নি!")
 
-
-
-# Async number adding with serial number
+# Optimized async number adding
 async def async_add_number_optimized(token, phone, msg, username, serial_number=None):
     try:
         async with aiohttp.ClientSession() as session:
@@ -1456,7 +1421,7 @@ async def async_add_number_optimized(token, phone, msg, username, serial_number=
         await msg.edit_text(f"{prefix}`{phone}` ❌ Add Failed", parse_mode='Markdown')
         account_manager.release_token(username)
 
-# Process multiple numbers from a single message
+# Optimized multiple number processing
 async def process_multiple_numbers(update: Update, context: CallbackContext, text: str):
     """Process multiple phone numbers from a single message"""
     numbers = extract_phone_numbers(text)
@@ -1465,7 +1430,7 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
         await update.message.reply_text("❌ কোনো ভ্যালিড নম্বর পাওয়া যায়নি!")
         return
     
-    # Start processing immediately without any notification message - JUST LIKE BEFORE
+    # Start processing immediately without any notification message
     for index, phone in enumerate(numbers, 1):
         if account_manager.get_remaining_checks() <= 0:
             # Only notify if all accounts are full
@@ -1491,7 +1456,7 @@ async def process_multiple_numbers(update: Update, context: CallbackContext, tex
         if context.job_queue:
             context.job_queue.run_once(
                 track_status_optimized, 
-                2,
+                1.5,  # Faster initial check
                 data={
                     'chat_id': update.message.chat_id,
                     'message_id': msg.message_id,
@@ -1593,7 +1558,7 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
             if context.job_queue:
                 context.job_queue.run_once(
                     track_status_optimized, 
-                    2,
+                    1.5,  # Faster initial check
                     data={
                         'chat_id': update.message.chat_id,
                         'message_id': msg.message_id,
@@ -1640,12 +1605,10 @@ def main():
     async def initialize_bot():
         await account_manager.initialize()
         
-        # Start enhanced keep-alive system
-        asyncio.create_task(keep_alive_enhanced())
-        asyncio.create_task(random_ping()) 
-        asyncio.create_task(immediate_ping())
+        # Start optimized keep-alive only
+        asyncio.create_task(optimized_keep_alive())
         
-        print("🤖 Bot initialized successfully with enhanced keep-alive!")
+        print("🤖 Bot initialized with optimized performance!")
     
     loop.run_until_complete(initialize_bot())
     
@@ -1666,20 +1629,20 @@ def main():
     
     if application.job_queue:
         application.job_queue.run_repeating(reset_daily_stats, interval=86400, first=0)
-        application.job_queue.run_repeating(check_subscription_expiry, interval=1800, first=0)  # Check every 30 minutes
+        application.job_queue.run_repeating(check_subscription_expiry, interval=1800, first=0)
     else:
         print("❌ JobQueue not available, daily stats reset not scheduled")
     
-    print("🚀 Bot starting polling with 24/7 keep-alive...")
+    print("🚀 Bot starting polling with optimized performance...")
     
     try:
+        # REMOVED pool_timeout parameter
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True
         )
     except Exception as e:
         print(f"❌ Bot error: {e}")
-        # Auto-restart after 10 seconds
         time.sleep(10)
         main()
 
