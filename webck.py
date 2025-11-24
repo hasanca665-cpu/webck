@@ -1024,7 +1024,7 @@ async def track_status_optimized(context: CallbackContext):
                     print(f"❌ Final message update failed for {phone}: {e}")
             return
         
-        if checks >= 6:
+        if checks >= 20:
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
             timeout_text = f"{prefix}`{phone}` 🟡 Try leter "
