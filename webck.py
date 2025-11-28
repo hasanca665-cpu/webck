@@ -96,7 +96,7 @@ async def keep_alive_enhanced():
         "https://webck-9utn.onrender.com",
         "https://webck-9utn.onrender.com/ping",
         "https://webck-9utn.onrender.com/health",
-        "https://wslink-ui5u.onrender.com,
+        "https://wslink-ui5u.onrender.com",
         "https://ssclink.onrender.com"
     ]
     
