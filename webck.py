@@ -435,17 +435,36 @@ async def get_status_async(session, token, phone):
                 print(f"❌ JSON decode error for {phone}: {e}")
                 return -2, "❌ API Error", None
             
+            # টোকেন এক্সপায়ার্ড চেক
             if res.get('code') == 28004:
                 print(f"❌ Login required for {phone}")
                 return -1, "❌ Token Expired", None
             
-            if res.get('msg') and any(keyword in res.get('msg').lower() for keyword in ["already exists", "cannot register", "number exists"]):
-                print(f"❌ Number {phone} already exists or cannot register")
-                return 16, "🚫 Already Exists", None
-            if res.get('code') in (400, 409):
-                print(f"❌ Number {phone} already exists, code {res.get('code')}")
+            # API এর বিভিন্ন রেসপন্স মেসেজ চেক
+            res_msg = res.get('msg', '').lower()
+            res_code = res.get('code')
+            
+            # যদি API সরাসরি বলে নম্বর ব্যান্ড/ব্লক/রেস্ট্রিক্টেড
+            if any(keyword in res_msg for keyword in ["ban", "block", "restricted", "cannot register", "not eligible", "invalid"]):
+                print(f"❌ Number {phone} is banned/blocked according to API")
+                return 7, "🚫 Ban Number", None
+            
+            # যদি API বলে নম্বর ইতিমধ্যেই আছে
+            if any(keyword in res_msg for keyword in ["already exists", "number exists"]):
+                print(f"❌ Number {phone} already exists")
                 return 16, "🚫 Already Exists", None
             
+            # বিভিন্ন error কোড হ্যান্ডেল
+            if res_code in (400, 409, 403, 404):
+                print(f"❌ Number {phone} has API error code {res_code}")
+                if res_code == 409:
+                    return 16, "🚫 Already Exists", None
+                elif res_code in (403, 404):
+                    return 7, "🚫 Ban Number", None
+                else:
+                    return 0, "⚠️ Check Failed", None
+            
+            # স্বাভাবিক রেসপন্স প্রসেস
             if (res and "data" in res and "records" in res["data"] and 
                 res["data"]["records"] and len(res["data"]["records"]) > 0):
                 record = res["data"]["records"][0]
@@ -454,7 +473,10 @@ async def get_status_async(session, token, phone):
                 status_name = status_map.get(status_code, f"🔸 Status {status_code}")
                 return status_code, status_name, record_id
             
-            return None, "🔵 Checking...", None
+            # কোনো ডাটা না পাওয়া গেলে
+            print(f"ℹ️ No data found for {phone}")
+            return -3, "❌ No Data Found", None
+            
     except Exception as e:
         print(f"❌ Status error for {phone}: {e}")
         return -2, "🔄 Refresh Server", None
@@ -965,6 +987,7 @@ async def handle_subscription_callback(update: Update, context: CallbackContext)
         await subscription_management(update, context)
 
 # Track status
+# track_status_optimized ফাংশনে
 async def track_status_optimized(context: CallbackContext):
     data = context.job.data
     phone = data['phone']
@@ -979,6 +1002,22 @@ async def track_status_optimized(context: CallbackContext):
             status_code, status_name, record_id = await get_status_async(session, token, phone)
         
         prefix = f"{serial_number}. " if serial_number else ""
+        
+        # API থেকে সরাসরি ব্যান্ড/ব্লক/রেস্ট্রিক্টেড স্ট্যাটাস আসলে
+        if status_code in [7, 11, 12] or "Ban" in status_name or "Block" in status_name:
+            account_manager.release_token(username)
+            final_text = f"{prefix}`{phone}` {status_name}"
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=data['chat_id'], 
+                    message_id=data['message_id'],
+                    text=final_text,
+                    parse_mode='Markdown'
+                )
+            except BadRequest as e:
+                if "Message is not modified" not in str(e):
+                    print(f"❌ Message update failed for {phone}: {e}")
+            return
         
         if status_code == -1:
             account_manager.release_token(username)
@@ -1008,7 +1047,7 @@ async def track_status_optimized(context: CallbackContext):
                 if "Message is not modified" not in str(e):
                     print(f"❌ Message update failed for {phone}: {e}")
         
-        final_states = [0, 1, 4, 7, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16]
+        final_states = [0, 1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]
         if status_code in final_states:
             account_manager.release_token(username)
             deleted_count = await delete_number_from_all_accounts_optimized(phone)
@@ -1056,7 +1095,7 @@ async def track_status_optimized(context: CallbackContext):
     except Exception as e:
         print(f"❌ Tracking error for {phone}: {e}")
         account_manager.release_token(username)
-
+        
 # Bulk delete
 async def delete_number_from_all_accounts_optimized(phone):
     accounts = load_accounts()
