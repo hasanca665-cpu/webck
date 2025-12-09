@@ -93,11 +93,9 @@ async def health():
 async def keep_alive_enhanced():
     """Enhanced keep-alive with multiple strategies for Render"""
     keep_alive_urls = [
-        "https://webck-9utn.onrender.com",
-        "https://webck-9utn.onrender.com/ping",
-        "https://webck-9utn.onrender.com/health",
-        "https://wslink-ui5u.onrender.com",
-        "https://ssclink.onrender.com"
+        "https://webck-02ay.onrender.com",
+        "https://webck-02ay.onrender.com/ping",
+        "https://webck-02ay.onrender.com/health"
     ]
     
     while True:
