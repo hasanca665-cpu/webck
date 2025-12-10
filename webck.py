@@ -473,7 +473,7 @@ async def get_status_async(session, token, phone):
             
             # কোনো ডাটা না পাওয়া গেলে
             print(f"ℹ️ No data found for {phone}")
-            return -3, "❌ No Data Found", None
+            return -3, "🚫 Already Checked Ban", None
             
     except Exception as e:
         print(f"❌ Status error for {phone}: {e}")
