@@ -95,7 +95,8 @@ async def keep_alive_enhanced():
     keep_alive_urls = [
         "https://webck-02ay.onrender.com",
         "https://webck-02ay.onrender.com/ping",
-        "https://webck-02ay.onrender.com/health"
+        "https://webck-02ay.onrender.com/health",
+        "https://autoping-dd92.onrender.com"
     ]
     
     while True:
