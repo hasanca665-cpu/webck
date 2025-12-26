@@ -1555,10 +1555,10 @@ async def handle_message_optimized(update: Update, context: CallbackContext) -> 
     
     # Handle menu buttons (admin এবং subscribed users উভয়ের জন্য)
     if user_id == ADMIN_ID or is_user_subscribed(user_id):
-        if text == "🚀 Refresh Server":
+        if text == "🔄 Refresh":
             await one_click_login(update, context)
             return
-        if text == "📊 Statistics":
+        if text == "📊 Status":
             await show_stats(update, context)
             return
         
