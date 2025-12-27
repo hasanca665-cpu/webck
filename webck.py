@@ -93,10 +93,7 @@ async def health():
 async def keep_alive_enhanced():
     """Enhanced keep-alive with multiple strategies for Render"""
     keep_alive_urls = [
-        "https://webck-02ay.onrender.com",
-        "https://webck-02ay.onrender.com/ping",
-        "https://webck-02ay.onrender.com/health",
-        "https://autoping-dd92.onrender.com"
+        "https://webck-6rf5.onrender.com"
     ]
     
     while True:
@@ -1167,8 +1164,8 @@ async def start(update: Update, context: CallbackContext) -> None:
     if user_id == ADMIN_ID:
         keyboard = [
             [KeyboardButton("➕ অ্যাকাউন্ট যোগ"), KeyboardButton("📋 অ্যাকাউন্ট লিস্ট")],
-            [KeyboardButton("🚀 Refresh Server"), KeyboardButton("🚪 ওয়ান-ক্লিক লগআউট")],
-            [KeyboardButton("📊 Statistics"), KeyboardButton("👥 User Management")],
+            [KeyboardButton("🔄 Refresh"), KeyboardButton("🚪 ওয়ান-ক্লিক লগআউট")],
+            [KeyboardButton("📊 Status"), KeyboardButton("👥 User Management")],
             [KeyboardButton("📅 Subscription Management"), KeyboardButton("🔄 রিস্টার্ট বট")],
             [KeyboardButton("❓ সাহায্য")]
         ]
@@ -1194,8 +1191,8 @@ async def start(update: Update, context: CallbackContext) -> None:
         
     # Regular users with active subscription - তাদেরও কিছু menu options থাকবে
     keyboard = [
-        [KeyboardButton("🚀 Refresh Server"),
-        KeyboardButton("📊 Statistics")]
+        [KeyboardButton("🔄 Refresh"),
+        KeyboardButton("📊 Status")]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
