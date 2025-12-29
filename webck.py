@@ -42,12 +42,12 @@ MAX_PER_ACCOUNT = 5
 
 # Subscription plans
 SUBSCRIPTION_PLANS = {
-    "1": {"days": 1, "price": 30, "label": "1 দিন"},
-    "3": {"days": 3, "price": 90, "label": "3 দিন"}, 
-    "5": {"days": 5, "price": 150, "label": "5 দিন"},
-    "7": {"days": 7, "price": 210, "label": "7 দিন"},
-    "15": {"days": 15, "price": 450, "label": "15 দিন"},
-    "30": {"days": 30, "price": 800, "label": "30 দিন"}
+    "1": {"days": 1, "price": 15, "label": "1 দিন"},
+    "3": {"days": 3, "price": 40, "label": "3 দিন"}, 
+    
+    "7": {"days": 7, "price": 90, "label": "7 দিন"},
+    "15": {"days": 15, "price": 180, "label": "15 দিন"},
+    "30": {"days": 30, "price": 350, "label": "30 দিন"}
 }
 
 # Status map
@@ -58,17 +58,17 @@ status_map = {
     3: "⚠️ Try Again Later",
     4: "🟢 Fresh Number",
     7: "🚫 Ban Number",
-    5: "🟡 Pending Verification",
+    5: "🟡 Try leter",
     6: "🔴 Blocked",
     8: "🟠 Limited",
     9: "🔶 Restricted", 
     10: "🟣 VIP Number",
-    11: "⚫ Banned",
+    11: "🚫 Ban Number",
     12: "🟤 Temp Blocked",
     13: "💤 Inactive",
     14: "🌀 Processing",
     15: "📞 Call Required",
-    -1: "❌ Token Expired",
+    -1: "❌ Expired",
     -2: "❌ API Error",
     -3: "❌ No Data Found",
     16: "🚫 Already Exists"
